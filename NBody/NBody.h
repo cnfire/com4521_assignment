@@ -2,15 +2,23 @@
 #ifndef __NBODY_HEADER__
 #define __NBODY_HEADER__
 
-#define G			9.8f		//gravitational constant
-#define dt			0.01f		//time step
-#define SOFTENING	2.0f		//softening parameter to help with numerical instability
+#define G            9.8f        //gravitational constant
+#define dt            0.01f        //time step
+#define SOFTENING    2.0f        //softening parameter to help with numerical instability
 
-struct nbody{
-	float x, y, vx, vy, m;
+struct nbody {
+    float x, y, vx, vy, m;
 };
-
-typedef enum MODE { CPU, OPENMP, CUDA } MODE;
 typedef struct nbody nbody;
 
-#endif	//__NBODY_HEADER__
+typedef enum MODE {
+    CPU, OPENMP, CUDA
+} MODE;
+
+
+struct vector {
+    float x, y;
+};
+typedef struct vector vector;
+
+#endif    //__NBODY_HEADER__
