@@ -13,6 +13,7 @@ void print_help();
 void step(void);
 
 
+
 int main(int argc, char *argv[]) {
 
 	//TODO: Processes the command line arguments
