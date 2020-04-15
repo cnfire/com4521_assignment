@@ -74,8 +74,8 @@ int main(int argc, char* argv[]) {
 		printf("\n\nStart simulate by visualisation mode with %s computing...", M == CPU ? "CPU" : "OPENMP");
 		initViewer(N, D, M, step);
 		setNBodyPositions(bodies);
-		//setActivityMapData(density);
-		setHistogramData(density);
+		setActivityMapData(density);
+		//setHistogramData(density);
 		startVisualisationLoop();
 	}
 	else {
@@ -98,8 +98,8 @@ int main(int argc, char* argv[]) {
 		}
 		// stop timer
 		double end_outer = omp_get_wtime();
-		double total_elapsed = end_outer - begin_outer;
-		printf("\n\nFully Complete in %d seconds %f milliseconds\n", (int)total_elapsed, 1000 * (total_elapsed - (int)total_elapsed));
+		double total = end_outer - begin_outer;
+		printf("\n\nFully Complete in %d seconds %f milliseconds\n", (int)total, 1000 * (total - (int)total));
 	}
 	return 0;
 }
