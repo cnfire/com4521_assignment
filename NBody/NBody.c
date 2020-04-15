@@ -14,14 +14,7 @@
 #define P  5
 //delimiter of parameters in csv file
 #define DELIMITER  ','
-
 #define LARGER_N 10
-
-void print_help();
-
-void step(void);
-
-void step_with_parallel(void);
 
 // the number of bodies to simulate
 int N = 0;
@@ -36,6 +29,191 @@ char* input_file = NULL;
 nbody* bodies = NULL;
 // store the values of the D*D locations
 float* density;
+// force of every body
+vector* f_arr;
+
+void print_help();
+void parse_parameter(int argc, char* argv[]);
+void init_data_by_random(nbody* bodies);
+void load_data_from_file(nbody* bodies);
+void step(void);
+void serial_compute(void);
+void parallel_compute(void);
+void calc_density(void);
+void update_location_velocity(void);
+
+int main(int argc, char* argv[]) {
+	/*print_help();
+	printf("\n");*/
+
+	// Processes the command line arguments
+	// argc in the count of the command arguments
+	// argv is an array (of length argc) of the arguments. The first argument is always the executable name (including path)
+	parse_parameter(argc, argv);
+
+	// Allocate any heap memory
+	bodies = (nbody*)malloc(N * sizeof(nbody));
+	// initialize all values are zero
+	density = (float*)calloc(D * D, sizeof(float));
+	f_arr = (vector*)malloc(N * sizeof(vector));
+
+	// Depending on program arguments, either read initial data from file or generate random data.
+	if (input_file == NULL) {
+		printf("\nGenerate random data...");
+		init_data_by_random(bodies);
+	}
+	else {
+		printf("\nLoad data from csv...");
+		load_data_from_file(bodies);
+	}
+	// print_bodies();
+
+	// Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
+	if (I == 0) {
+		printf("\nStart simulate by visualisation mode with %s computing...", M == CPU ? "CPU" : "OPENMP");
+		initViewer(N, D, M, step);
+		setNBodyPositions(bodies);
+		//setActivityMapData(density);
+		setHistogramData(density);
+		startVisualisationLoop();
+	}
+	else {
+		printf("\nStart simulate by console mode with %s computing...", M == CPU ? "CPU" : "OPENMP");
+		// start timer
+		double begin_outer = omp_get_wtime();
+		for (int i = 0; i < I; i++) {
+			double begin = omp_get_wtime();
+			step();
+			double end = omp_get_wtime();
+			double elapsed = end - begin;
+			printf("\nIteration epoch:%d, Complete in %f seconds\n", i, elapsed);
+		}
+		// stop timer
+		double end_outer = omp_get_wtime();
+		double total_elapsed = end_outer - begin_outer;
+		printf("\nFully Complete in %f seconds\n", total_elapsed);
+	}
+	return 0;
+}
+
+void step(void) {
+	// Perform the main simulation of the NBody system
+	if (M == CPU) {
+		serial_compute();
+	}
+	else if (M == OPENMP) {
+		parallel_compute();
+	}
+	else {
+		fprintf(stderr, "\n%d mode is not supported", M);
+	}
+}
+
+void serial_compute() {
+	// compute the force of every body
+	for (int j = 0; j < N; j++) {
+		nbody* body_j = &bodies[j];
+		vector f = { 0, 0 };
+		for (int k = 0; k < N; k++) {
+			// skip the influence of body on itself
+			if (k == j) continue;
+			nbody* body_k = &bodies[k];
+			vector s1 = { body_k->x - body_j->x, body_k->y - body_j->y };
+			vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
+			double s3 = pow(pow(s1.x, 2) + pow(s1.y, 2) + pow(SOFTENING, 2), 1.5);
+			f.x = (float)(f.x + s2.x / s3);
+			f.y = (float)(f.y + s2.y / s3);
+		}
+		f.x = G * body_j->m * f.x;
+		f.y = G * body_j->m * f.y;
+		f_arr[j].x = f.x;
+		f_arr[j].y = f.y;
+	}
+	calc_density();
+	update_location_velocity();
+}
+
+void parallel_compute() {
+	// compute the force of every body
+	int j;
+#pragma omp parallel for default(none) shared(N, bodies, f_arr) 
+	for (j = 0; j < N; j++) {
+		nbody* body_j = &bodies[j];
+		vector f = { 0, 0 };
+		for (int k = 0; k < N; k++) {
+			// skip the influence of body on itself
+			if (k == j) continue;
+			nbody* body_k = &bodies[k];
+			vector s1 = { body_k->x - body_j->x, body_k->y - body_j->y };
+			vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
+			double s3 = pow(pow(s1.x, 2) + pow(s1.y, 2) + pow(SOFTENING, 2), 1.5);
+			f.x = (float)(f.x + s2.x / s3);
+			f.y = (float)(f.y + s2.y / s3);
+		}
+		f.x = G * body_j->m * f.x;
+		f.y = G * body_j->m * f.y;
+		f_arr[j].x = f.x;
+		f_arr[j].y = f.y;
+	}
+#pragma omp barrier
+#pragma omp master
+
+	calc_density();
+	update_location_velocity();
+}
+
+// calculate the values of the D*D locations (density)
+void calc_density() {
+	// reset the value to zero
+	for (int j = 0; j < D * D; j++) {
+		density[j] = 0.0f;
+	}
+	for (int j = 0; j < N; j++) {
+		nbody* body = &bodies[j];
+		double scale = 1.0 / D;
+		// x-axis coordinate of D*D locations
+		int x = (int)ceil(body->x / scale) - 1;
+		// y-axis coordinate of D*D locations
+		int y = (int)ceil(body->y / scale) - 1;
+		// the index of one dimensional array
+		int index = x * D + (y + 1);
+		// For large values of N
+		int a = N;
+		if (N > LARGER_N) {
+			a = N * D;
+		}
+		density[index] = (density[index] * a + 1) / a;
+		//            density[index] = density[index] + 1;
+		//            printf("\nindex:%d: density:%f", index, density[index]);
+	}
+}
+
+// // update location and velocity of nbodies
+void update_location_velocity() {
+	for (int j = 0; j < N; j++) {
+		nbody* body = &bodies[j];
+		vector a = { f_arr[j].x / body->m, f_arr[j].y / body->m };
+		// new velocity
+		vector v_new = { body->vx + dt * a.x, body->vy + dt * a.y };
+		// new location
+		vector l_new = { body->x + dt * v_new.x, body->y + dt * v_new.y };
+		body->x = l_new.x;
+		body->y = l_new.y;
+		body->vx = v_new.x;
+		body->vy = v_new.y;
+	}
+}
+
+void print_help() {
+	printf("nbody_%s N D M [-i I] [-i input_file]\n", USER_NAME);
+
+	printf("where:\n");
+	printf("\tN                Is the number of bodies to simulate.\n");
+	printf("\tD                Is the integer dimension of the activity grid. The Grid has D*D locations.\n");
+	printf("\tM                Is the operation mode, either  'CPU' or 'OPENMP'\n");
+	printf("\t[-i I]           Optionally specifies the number of simulation I 'I' to perform. Specifying no value will use visualisation mode. \n");
+	printf("\t[-f input_file]  Optionally specifies an input file with an initial N bodies of data. If not specified random data will be created.\n");
+}
 
 MODE str2enum(char* str) {
 	//    MODE myEnum = (MODE)enum.Parse(typeof(MODE), str);
@@ -46,9 +224,9 @@ MODE str2enum(char* str) {
 
 void parse_parameter(int argc, char* argv[]) {
 	//printf("\n params len:%s", argv[1]);
-	for (int i = 1; i < argc; i++) {
+	/*for (int i = 1; i < argc; i++) {
 		printf("Argument %d: %s\n", i, argv[i]);
-	}
+	}*/
 	if (!(argc == 4 || argc == 6 || argc == 8)) {
 		fprintf(stderr, "\nInput parameter format is incorrect, please check.\n");
 		exit(0);
@@ -162,217 +340,9 @@ void print_bodies() {
 	}
 }
 
-int main(int argc, char* argv[]) {
-	print_help();
-	printf("\n");
-
-	//TODO: Processes the command line arguments
-	//argc in the count of the command arguments
-	//argv is an array (of length argc) of the arguments. The first argument is always the executable name (including path)
-	parse_parameter(argc, argv);
-
-
-	//TODO: Allocate any heap memory
-//    nbody arr[N];
-	bodies = (nbody*)malloc(N * sizeof(nbody));
-	// initialize all values are zero
-	density = (float*)calloc(D * D, sizeof(float));
-
-	//TODO: Depending on program arguments, either read initial data from file or generate random data.
-	if (input_file == NULL) {
-		printf("\ngenerate random data...");
-		init_data_by_random(bodies);
-	}
-	else {
-		printf("\nload data from csv...");
-		//        load_data_from_file(bodies);
-		init_data_by_random(bodies);
-	}
-	//    print_bodies();
-
-
-		//TODO: Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
-	if (M == CPU) {
-		//for (int i = 0; i < I; i++) {
-		//	printf("\niteration epoch:%d", i);
-		//	//start timer
-		//	double begin = omp_get_wtime();
-		//	step();
-		//	//stop timer
-		//	double end = omp_get_wtime();
-		//	double elapsed = end - begin;
-		//	printf("\nComplete in %f seconds\n", elapsed);
-		//}
-
-
-		initViewer(N, D, M, step);
-		setNBodyPositions(bodies);
-		//setActivityMapData(density);
-		setHistogramData(density);
-		startVisualisationLoop();
-	}
-	else if (M == OPENMP) {
-		printf("\ncompute by openmp");
-		step_with_parallel();
-	}
-	else {
-		fprintf(stderr, "\n%d mode is not supported", M);
-	}
-	return 0;
-}
-
-void step(void) {
-	//TODO: Perform the main simulation of the NBody system
-	printf("\ncompute by serial");
-	vector* f_arr = (vector*)malloc(N * sizeof(vector));
-	//        vector f_arr[N];
-	for (int l = 0; l < N; l++) {
-		nbody* body_l = &bodies[l];
-		vector f = { 0, 0 };
-		for (int j = 0; j < N; j++) {
-			// skip the influence of body on itself
-			if (j == l) continue;
-			nbody* body_j = &bodies[j];
-			vector s1 = { body_j->x - body_l->x, body_j->y - body_l->y };
-			vector s2 = { s1.x * body_j->m, s1.y * body_j->m };
-			double s3 = pow(pow(s1.x, 2) + pow(s1.y, 2) + pow(SOFTENING, 2), 1.5);
-			f.x = (float)(f.x + s2.x / s3);
-			f.y = (float)(f.y + s2.y / s3);
-		}
-		f.x = G * body_l->m * f.x;
-		f.y = G * body_l->m * f.y;
-		//                printf("\nvector %d = (%f,%f)", j, f.x, f.y);
-		f_arr[l].x = f.x;
-		f_arr[l].y = f.y;
-	}
-	//        print_bodies();
-
-			//calculate the values of the D*D locations (density)
-			// reset the value to zero
-	for (int j = 0; j < D * D; j++) {
-		density[j] = 0.0f;
-	}
-	for (int j = 0; j < N; j++) {
-		nbody* body = &bodies[j];
-		double scale = 1.0 / D;
-		// x-axis coordinate of D*D locations
-		int x = (int)ceil(body->x / scale) - 1;
-		// y-axis coordinate of D*D locations
-		int y = (int)ceil(body->y / scale) - 1;
-		// the index of one dimensional array
-		int index = x * D + (y + 1);
-		// For large values of N
-		int a = N;
-		if (N > LARGER_N) {
-			a = N * D;
-		}
-		density[index] = (density[index] * a + 1) / a;
-		//            density[index] = density[index] + 1;
-		//            printf("\nindex:%d: density:%f", index, density[index]);
-	}
-	//        for (int j = 0; j < D * D; j++) {
-	//            printf("\nindex:%d: density:%f", j, density[j]);
-	//        }
-
-			// update location,velocity,
-	for (int j = 0; j < N; j++) {
-		nbody* body = &bodies[j];
-		vector a = { f_arr[j].x / body->m, f_arr[j].y / body->m };
-		// new velocity
-		vector v_new = { body->vx + dt * a.x, body->vy + dt * a.y };
-		// new location
-		vector l_new = { body->x + dt * v_new.x, body->y + dt * v_new.y };
-		body->x = l_new.x;
-		body->y = l_new.y;
-		body->vx = v_new.x;
-		body->vy = v_new.y;
-	}
-
-}
-
-void step_with_parallel(void) {
-	printf("\ncompute by parallel");
-	vector* f_arr = (vector*)malloc(N * sizeof(vector));
-
-	for (int i = 0; i < I; i++) {
-		//start timer
-		double begin = omp_get_wtime();
-		printf("\niteration epoch:%d", i);
-		int l;
-#pragma omp parallel for default(none) shared(N, bodies, f_arr) 
-		for (l = 0; l < N; l++) {
-			nbody* body_l = &bodies[l];
-			vector f = { 0, 0 };
-			//#pragma omp parallel for default(none) private(l) shared(body_l,N,bodies)
-			for (int j = 0; j < N; j++) {
-				// skip the influence of body on itself
-				if (j == l) continue;
-				nbody* body_j = &bodies[j];
-				vector s1 = { body_j->x - body_l->x, body_j->y - body_l->y };
-				vector s2 = { s1.x * body_j->m, s1.y * body_j->m };
-				double s3 = pow(pow(s1.x, 2) + pow(s1.y, 2) + pow(SOFTENING, 2), 1.5);
-				f.x = f.x + s2.x / s3;
-				f.y = f.y + s2.y / s3;
-			}
-			f.x = G * body_l->m * f.x;
-			f.y = G * body_l->m * f.y;
-			f_arr[l].x = f.x;
-			f_arr[l].y = f.y;
-		}
-		//        print_bodies();
-
-#pragma omp barrier
-#pragma omp master
-
-		// reset the value to zero
-		for (int j = 0; j < D * D; j++) {
-			density[j] = 0.0f;
-		}
-
-		//#pragma omp parallel for num_threads(2) default(none) shared(D, N, bodies, f_arr, density)
-		for (int j = 0; j < N; j++) {
-			nbody* body = &bodies[j];
-
-			// calculate the values of the D*D locations (density)
-			double scale = 1.0 / D;
-			// x-axis coordinate of D*D locations
-			int x = (int)ceil(body->x / scale) - 1;
-			// y-axis coordinate of D*D locations
-			int y = (int)ceil(body->y / scale) - 1;
-			// the index of one dimensional array
-			int index = x * D + (y + 1);
-			// For large values of N
-			int a = N;
-			if (N > LARGER_N) {
-				a = N * D;
-			}
-			density[index] = (density[index] * a + 1) / a;
-
-			// update location,velocity
-			vector v = { f_arr[j].x / body->m, f_arr[j].y / body->m };
-			// new velocity
-			vector v_new = { body->vx + dt * v.x, body->vy + dt * v.y };
-			// new location
-			vector l_new = { body->x + dt * v_new.x, body->y + dt * v_new.y };
-			body->x = l_new.x;
-			body->y = l_new.y;
-			body->vx = v_new.x;
-			body->vy = v_new.y;
-		}
-		//stop timer
-		double end = omp_get_wtime();
-		double elapsed = end - begin;
-		printf(" Complete in %f seconds\n", elapsed);
-	}
-}
-
-void print_help() {
-	printf("nbody_%s N D M [-i I] [-i input_file]\n", USER_NAME);
-
-	printf("where:\n");
-	printf("\tN                Is the number of bodies to simulate.\n");
-	printf("\tD                Is the integer dimension of the activity grid. The Grid has D*D locations.\n");
-	printf("\tM                Is the operation mode, either  'CPU' or 'OPENMP'\n");
-	printf("\t[-i I]           Optionally specifies the number of simulation I 'I' to perform. Specifying no value will use visualisation mode. \n");
-	printf("\t[-f input_file]  Optionally specifies an input file with an initial N bodies of data. If not specified random data will be created.\n");
+void get_openGL_info() {
+	//glutInit(&argc, argv);
+	glutCreateWindow("GLUT");
+	glewInit();
+	printf("OpenGL version supported by this platform (%s): \n", glGetString(GL_VERSION));
 }
