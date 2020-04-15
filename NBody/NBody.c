@@ -1,4 +1,4 @@
-#include <stdio.h>
+ï»¿#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -87,7 +87,8 @@ int main(int argc, char* argv[]) {
 			step();
 			double end = omp_get_wtime();
 			double elapsed = end - begin;
-			printf("\n\nIteration epoch:%d, Complete in %f seconds", i, elapsed);
+			printf("\n\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
+
 			//print_bodies();
 
 			/*for (int i = 0; i < D * D; i++) {
@@ -98,7 +99,7 @@ int main(int argc, char* argv[]) {
 		// stop timer
 		double end_outer = omp_get_wtime();
 		double total_elapsed = end_outer - begin_outer;
-		printf("\n\nFully Complete in %f seconds\n", total_elapsed);
+		printf("\n\nFully Complete in %d seconds %f milliseconds\n", (int)total_elapsed, 1000 * (total_elapsed - (int)total_elapsed));
 	}
 	return 0;
 }
@@ -256,7 +257,7 @@ void parse_parameter(int argc, char* argv[]) {
  * generate random data from 0 ~ 1
  */
 float random_float() {
-	// ÉèÖÃËæ»úÊýÖÖ×Ó£¬Ê¹Ã¿´Î²úÉúµÄËæ»úÐòÁÐ²»Í¬
+	// è®¾ç½®éšæœºæ•°ç§å­ï¼Œä½¿æ¯æ¬¡äº§ç”Ÿçš„éšæœºåºåˆ—ä¸åŒ
 	//    srand(NULL);
 		// Keep only one decimal place
 	float result = rand() % 10 / (float)10;
@@ -273,10 +274,10 @@ void init_data_by_random(nbody* bodies) {
 	}
 }
 
-/**ÅÐ¶Ïstr1ÊÇ·ñÒÔstr2¿ªÍ·
- * Èç¹ûÊÇ·µ»Ø1
- * ²»ÊÇ·µ»Ø0
- * ³ö´í·µ»Ø-1
+/**åˆ¤æ–­str1æ˜¯å¦ä»¥str2å¼€å¤´
+ * å¦‚æžœæ˜¯è¿”å›ž1
+ * ä¸æ˜¯è¿”å›ž0
+ * å‡ºé”™è¿”å›ž-1
  * */
 int is_begin_with(const char* str1, char* str2) {
 	if (str1 == NULL || str2 == NULL)
@@ -296,13 +297,13 @@ int is_begin_with(const char* str1, char* str2) {
 	return 1;
 }
 
-// todo ×Ö·û´®·Ö¸îÊ±Ê£ÏÂµÄ2¸öÎÊÌâ£º1£º",,,"
+// todo å­—ç¬¦ä¸²åˆ†å‰²æ—¶å‰©ä¸‹çš„2ä¸ªé—®é¢˜ï¼š1ï¼š",,,"
 float* split(char* str) {
 	float* result = (float*)malloc(P * sizeof(float));
 	char* ptr = strtok(str, ",");
 	int i = 0;
 	while (ptr != NULL) {
-		//        todo Ä¬ÈÏÖµÉèÖÃ
+		//        todo é»˜è®¤å€¼è®¾ç½®
 		result[i] = (float)atof(ptr);
 		//        printf("split:%f", atof(ptr));
 		ptr = strtok(NULL, ",");
