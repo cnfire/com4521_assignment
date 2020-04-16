@@ -10,7 +10,6 @@
 
 #define USER_NAME "Xiaowei Zhu" 
 
-
 int N = 0;	// the number of bodies to simulate
 int D = 0;	// the integer dimension of the activity grid
 int I = 0;	// the number of simulation iterations
@@ -75,6 +74,11 @@ int main(int argc, char* argv[]) {
 		// stop timer
 		double total = omp_get_wtime() - begin_outer;
 		printf("\n\nFully Complete in %d seconds %f milliseconds\n", (int)total, 1000 * (total - (int)total));
+		
+		// free global variables
+		free(bodies);
+		free(densities);
+		free(forces);
 	}
 	return 0;
 }
