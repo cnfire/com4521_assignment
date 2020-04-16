@@ -173,10 +173,7 @@ void parallel_compute() {
 
 // calculate the values of the D*D locations (density)
 void calc_density() {
-	// reset the value to zero
-	for (int i = 0; i < D * D; i++) {
-		density[i] = 0.0f;
-	}
+	int* count_arr = (int*)calloc(D * D, sizeof(int));
 	for (int i = 0; i < N; i++) {
 		nbody* body = &bodies[i];
 		double scale = 1.0 / D;
@@ -185,16 +182,20 @@ void calc_density() {
 		// y-axis coordinate of D*D locations
 		int y = (int)ceil(body->y / scale) - 1;
 		// the index of one dimensional array
-		int index = x * D + (y + 1);
-		// For large values of N
-		int a = N;
-		if (N > LARGER_N) {
-			a = N * D;
-		}
-		density[index] = (density[index] * N + 1) / N;
+		int index = y * D + x;
+		count_arr[index] = count_arr[index] + 1;
+		//density[index] = (density[index] * N + 1) / N;
 		// density[index] = density[index] + 1;
 		// printf("\nindex:%d: density:%f", index, density[index]);
 	}
+
+	// reset the value to zero
+	for (int i = 0; i < D * D; i++) {
+		density[i] = count_arr[i] * 1.0 * D / N;
+	}
+
+	//free(count_arr);
+
 }
 
 // // update location and velocity of nbodies
