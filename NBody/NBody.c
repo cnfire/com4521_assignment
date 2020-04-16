@@ -36,6 +36,7 @@ void print_help();
 void parse_parameter(int argc, char* argv[]);
 void init_data_by_random(nbody* bodies);
 void load_data_from_file(nbody* bodies);
+char* get_string_in_range(char string[], int start, int end);
 void step(void);
 void serial_compute(void);
 void parallel_compute(void);
@@ -67,7 +68,7 @@ int main(int argc, char* argv[]) {
 		printf("\n\nLoad data from csv...");
 		load_data_from_file(bodies);
 	}
-	//print_bodies();
+	print_bodies();
 
 	// Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
 	if (I == 0) {
@@ -89,7 +90,7 @@ int main(int argc, char* argv[]) {
 			double elapsed = end - begin;
 			printf("\n\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
 
-			//print_bodies();
+			print_bodies();
 
 			/*for (int i = 0; i < D * D; i++) {
 				printf("%f,", density[i]*N);
@@ -257,10 +258,9 @@ void parse_parameter(int argc, char* argv[]) {
  * generate random data from 0 ~ 1
  */
 float random_float() {
-	// 设置随机数种子，使每次产生的随机序列不同
-	//    srand(NULL);
-		// Keep only one decimal place
-	float result = rand() % 10 / (float)10;
+	//srand(NULL);
+	// Keep only two decimal place
+	float result = rand() % 100 / (float)100;
 	return result;
 }
 
@@ -274,70 +274,76 @@ void init_data_by_random(nbody* bodies) {
 	}
 }
 
-/**判断str1是否以str2开头
- * 如果是返回1
- * 不是返回0
- * 出错返回-1
- * */
-int is_begin_with(const char* str1, char* str2) {
-	if (str1 == NULL || str2 == NULL)
-		return -1;
-	int len1 = strlen(str1);
-	int len2 = strlen(str2);
-	if ((len1 < len2) || (len1 == 0 || len2 == 0))
-		return -1;
-	char* p = str2;
-	int i = 0;
-	while (*p != '\0') {
-		if (*p != str1[i])
-			return 0;
-		p++;
+char* get_string_in_range(char string[], int start, int end) {
+	if (start == end) {
+		return NULL;
+	}
+	char* res = (char*)calloc(end - start, sizeof(char));
+	int i = 0, j = 0;
+	while (string[i] != '\0') {
+		if (i >= start && i < end) {
+			// filter space char
+			if (!isspace(string[i])) {
+				res[j++] = string[i];
+			}
+		}
 		i++;
 	}
-	return 1;
+	return strlen(res) == 0 ? NULL : res;
 }
 
-// todo 字符串分割时剩下的2个问题：1：",,,"
-float* split(char* str) {
-	float* result = (float*)malloc(P * sizeof(float));
-	char* ptr = strtok(str, ",");
-	int i = 0;
-	while (ptr != NULL) {
-		//        todo 默认值设置
-		result[i] = (float)atof(ptr);
-		//        printf("split:%f", atof(ptr));
-		ptr = strtok(NULL, ",");
+char** split(const char* string, char dim, int size) {
+	int len = strlen(string);
+	char* new_string = (char*)calloc(len + 2, sizeof(char));
+	strcpy(new_string, string);
+	new_string[strlen(new_string)] = dim;
+	char** res = (char**)malloc(size * sizeof(char*));
+	int i = 0, j = 0, start = 0, end = 0;
+	while (new_string[i] != '\0') {
+		if (new_string[i] == dim) {
+			end = i;
+			char* item = get_string_in_range(new_string, start, end);
+			start = end + 1;
+			res[j] = item;
+			j++;
+		}
 		i++;
 	}
-	return result;
+	free(new_string);
+	return res;
 }
 
 void load_data_from_file(nbody* bodies) {
-	char buff[255];
-	FILE* fp = NULL;
-	fp = fopen(input_file, "rb");
-	if (fp == NULL) {
+	char line[1000];
+	FILE* file = NULL;
+	file = fopen(input_file, "rb");
+	if (file == NULL) {
 		fprintf(stderr, "Error: Could not find file:%s \n", input_file);
 		exit(1);
 	}
 	int i = 0;
-	while (!feof(fp)) {
-		fgets(buff, 255, fp);
-		//        skip the comment line
-		if (is_begin_with(buff, "#") == 1) {
+	while (!feof(file)) {
+		fgets(line, 1000, file);
+		// skip the comment line and empty line
+		if (line[0] == '#' || isspace(line[0])) {
 			continue;
 		}
-		//        todo empty line skip
-		//        printf("\nbuff:%s", buff);
-		float* res = split(buff);
-		bodies[i].x = res[0];
-		bodies[i].y = res[1];
-		bodies[i].vx = res[2];
-		bodies[i].vy = res[3];
-		bodies[i].m = res[4];
+		char** res = split(line, ',', 5);
+		bodies[i].x = res[0] == NULL ? random_float() : atof(res[0]);
+		bodies[i].y = res[1] == NULL ? random_float() : atof(res[1]);
+		bodies[i].vx = res[2] == NULL ? 0 : atof(res[2]);
+		bodies[i].vy = res[3] == NULL ? 0 : atof(res[3]);
+		bodies[i].m = res[4] == NULL ? 1.0 / N : atof(res[4]);
 		i++;
+		// free the res memory
+		for (int i = 0; i < 5; i++) {
+			if (res[i] != NULL) {
+				free(res[i]);
+			}
+		}
+		free(res);
 	}
-	fclose(fp);
+	fclose(file);
 	if (i != N) {
 		fprintf(stderr, "\nN is %d and the number of body in csv file is %d, not equal!", N, i);
 		exit(0);
