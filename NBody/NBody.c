@@ -164,13 +164,9 @@ void calc_densities() {
 	for (int i = 0; i < D * D; i++) {
 		densities[i] = 0;
 	}
-	double start = omp_get_wtime();
 	calc_densities_by_serial();
 	//calc_densities_with_critical();
 	//calc_densities_with_atomic();
-	double total = omp_get_wtime() - start;
-	printf("\n\nComplete activity map caculation in %d seconds %f milliseconds\n", (int)total, 1000 * (total - (int)total));
-
 }
 
 /**
