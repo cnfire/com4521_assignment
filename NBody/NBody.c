@@ -414,7 +414,7 @@ char* get_string_in_range(char string[], int start, int end) {
 char** split(const char* string, char dim, int size) {
 	int len = strlen(string);
 	char* new_string = (char*)calloc(len + 2, sizeof(char));
-	//strcpy(new_string, string);
+	strcpy(new_string, string);
 	new_string[strlen(new_string)] = dim;
 	char** res = (char**)malloc(size * sizeof(char*));
 	int i = 0, j = 0, start = 0, end = 0;
@@ -431,5 +431,3 @@ char** split(const char* string, char dim, int size) {
 	free(new_string);
 	return res;
 }
-
-zc
