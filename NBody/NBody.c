@@ -138,7 +138,7 @@ void calc_forces_by_serial() {
 void calc_forces_by_parallel() {
 	// compute the force of every body
 	int j;
-#pragma omp parallel for num_threads(3) default(none) shared(N, bodies, forces) 
+#pragma omp parallel for default(none) shared(N, bodies, forces) 
 	for (j = 0; j < N; j++) {
 		nbody* body_j = &bodies[j];
 		vector f = { 0, 0 };
