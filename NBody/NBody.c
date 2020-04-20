@@ -268,6 +268,7 @@ void init_data_by_random() {
 void load_data_from_file() {
 	char line[1000];
 	FILE* file = NULL;
+#pragma warning(suppress : 4996)
 	file = fopen(input_file, "rb");
 	if (file == NULL) {
 		fprintf(stderr, "Error: Could not find file:%s \n", input_file);
@@ -280,7 +281,7 @@ void load_data_from_file() {
 		if (line[0] == '#' || isspace(line[0])) {
 			continue;
 		}
-		char** res = split(line, ',', 5);
+		char** res = split(line, ',', PARAMS_NUM_INPUT);
 		bodies[i].x = res[0] == NULL ? random_float() : atof(res[0]);
 		bodies[i].y = res[1] == NULL ? random_float() : atof(res[1]);
 		bodies[i].vx = res[2] == NULL ? 0 : atof(res[2]);
@@ -288,7 +289,7 @@ void load_data_from_file() {
 		bodies[i].m = res[4] == NULL ? 1.0 / N : atof(res[4]);
 		i++;
 		// free the res memory
-		for (int i = 0; i < 5; i++) {
+		for (int i = 0; i < PARAMS_NUM_INPUT; i++) {
 			if (res[i] != NULL) {
 				free(res[i]);
 			}
