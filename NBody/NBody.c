@@ -25,11 +25,12 @@ void parse_parameter(int argc, char* argv[]);
 void init_data_by_random();
 void load_data_from_file();
 void step(void);
-void serial_compute();
-void parallel_compute();
+void calc_forces_by_serial();
+void calc_forces_by_parallel();
 void calc_densities();
 void update_location_velocity();
 void print_bodies();
+void print_densities();
 char* get_string_in_range(char string[], int start, int end);
 char** split(const char* string, char dim, int size);
 
@@ -69,12 +70,15 @@ int main(int argc, char* argv[]) {
 			step();
 			double elapsed = omp_get_wtime() - begin;
 			printf("\n\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
-			print_bodies();
+			/*print_bodies();
+			print_densities();*/
 		}
+		/*print_bodies();
+		print_densities();*/
 		// stop timer
 		double total = omp_get_wtime() - begin_outer;
 		printf("\n\nFully Complete in %d seconds %f milliseconds\n", (int)total, 1000 * (total - (int)total));
-		
+
 		// free global variables
 		free(bodies);
 		free(densities);
@@ -87,21 +91,26 @@ int main(int argc, char* argv[]) {
  * Perform the main simulation of the NBody system (Simulation within a single iteration)
  */
 void step(void) {
+	// compute the force of every body with different way
 	if (M == CPU) {
-		serial_compute();
+		calc_forces_by_serial();
 	}
 	else if (M == OPENMP) {
-		parallel_compute();
+		calc_forces_by_parallel();
 	}
 	else {
 		fprintf(stderr, "\n%d mode is not supported", M);
 	}
+	// Calculate density for the D*D locations (density)
+	calc_densities();
+	// Update location and velocity of n bodies
+	update_location_velocity();
 }
 
 /**
  * Compute by serial mode
  */
-void serial_compute() {
+void calc_forces_by_serial() {
 	// compute the force of every body
 	for (int j = 0; j < N; j++) {
 		nbody* body_j = &bodies[j];
@@ -121,19 +130,15 @@ void serial_compute() {
 		forces[j].x = f.x;
 		forces[j].y = f.y;
 	}
-	// Calculate density for the D*D locations (density)
-	calc_densities();
-	// Update location and velocity of n bodies
-	update_location_velocity();
 }
 
 /**
  * Compute by paralle mode (using OPENMP)
  */
-void parallel_compute() {
+void calc_forces_by_parallel() {
 	// compute the force of every body
 	int j;
-#pragma omp parallel for default(none) shared(N, bodies, forces) 
+#pragma omp parallel for num_threads(3) default(none) shared(N, bodies, forces) 
 	for (j = 0; j < N; j++) {
 		nbody* body_j = &bodies[j];
 		vector f = { 0, 0 };
@@ -152,12 +157,6 @@ void parallel_compute() {
 		forces[j].x = f.x;
 		forces[j].y = f.y;
 	}
-#pragma omp barrier
-#pragma omp master
-	// Calculate density for the D*D locations (density)
-	calc_densities();
-	// Update location and velocity of n bodies
-	update_location_velocity();
 }
 
 /**
@@ -311,6 +310,16 @@ void print_bodies() {
 		printf("\nx:%f, y:%f, vx:%f, vy:%f, m:%f", bodies[i].x, bodies[i].y, bodies[i].vx, bodies[i].vy, bodies[i].m);
 	}
 	printf("\n");
+}
+
+/**
+ * Print all values of densities for testing
+ */
+void print_densities() {
+	printf("\nShow densities info:");
+	for (int i = 0; i < D * D; i++) {
+		printf("\n%d:%f", i, densities[i]);
+	}
 }
 
 /**
