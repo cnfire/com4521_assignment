@@ -16,7 +16,7 @@ int I = 0;	// the number of simulation iterations
 MODE M;	// operation mode
 char* input_file = NULL;	// input file with an initial N bodies of data
 nbody* bodies = NULL;
-float* densities;	// store the density values of the D*D locations
+float* densities;	// store the density values of the D*D locations (acitvity map)
 vector* forces;	// force(F) of every body
 
 // declaration of all functions
@@ -28,6 +28,9 @@ void step(void);
 void calc_forces_by_serial();
 void calc_forces_by_parallel();
 void calc_densities();
+void calc_densities_by_serial();
+void calc_densities_with_critical();
+void calc_densities_with_atomic();
 void update_location_velocity();
 void print_bodies();
 void print_densities();
@@ -42,6 +45,7 @@ int main(int argc, char* argv[]) {
 	// initialize all values are zero
 	densities = (float*)calloc(D * D, sizeof(float));
 	forces = (vector*)malloc(N * sizeof(vector));
+
 	// Depending on program arguments, either read initial data from file or generate random data.
 	if (input_file == NULL) {
 		printf("\n\nInit n bodies by generating random data...");
@@ -51,7 +55,7 @@ int main(int argc, char* argv[]) {
 		printf("\n\nInit n bodies by loading data from file...");
 		load_data_from_file();
 	}
-	print_bodies();
+	//print_bodies();
 	// Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
 	if (I == 0) {
 		printf("\n\nStart simulate by visualisation mode with %s computing...", M == CPU ? "CPU" : "OPENMP");
@@ -70,19 +74,12 @@ int main(int argc, char* argv[]) {
 			step();
 			double elapsed = omp_get_wtime() - begin;
 			printf("\n\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
-			/*print_bodies();
-			print_densities();*/
 		}
-		/*print_bodies();
-		print_densities();*/
+		//print_bodies();
+		//print_densities();
 		// stop timer
 		double total = omp_get_wtime() - begin_outer;
 		printf("\n\nFully Complete in %d seconds %f milliseconds\n", (int)total, 1000 * (total - (int)total));
-
-		// free global variables
-		free(bodies);
-		free(densities);
-		free(forces);
 	}
 	return 0;
 }
@@ -101,14 +98,14 @@ void step(void) {
 	else {
 		fprintf(stderr, "\n%d mode is not supported", M);
 	}
-	// Calculate density for the D*D locations (density)
+	// Calculate density for the D*D locations (activity map)
 	calc_densities();
 	// Update location and velocity of n bodies
 	update_location_velocity();
 }
 
 /**
- * Compute by serial mode
+ * Compute fore of every body by serial mode
  */
 void calc_forces_by_serial() {
 	// compute the force of every body
@@ -133,12 +130,12 @@ void calc_forces_by_serial() {
 }
 
 /**
- * Compute by paralle mode (using OPENMP)
+ * Compute fore of every body by paralle mode (using OPENMP)
  */
 void calc_forces_by_parallel() {
 	// compute the force of every body
 	int j;
-#pragma omp parallel for default(none) shared(N, bodies, forces) 
+#pragma omp parallel for default(none) shared(N, bodies, forces) schedule(dynamic)
 	for (j = 0; j < N; j++) {
 		nbody* body_j = &bodies[j];
 		vector f = { 0, 0 };
@@ -160,13 +157,26 @@ void calc_forces_by_parallel() {
 }
 
 /**
- * Calculate density for the D*D locations (density)
+ * Calculate activity map
  */
 void calc_densities() {
 	// reset the value to zero
 	for (int i = 0; i < D * D; i++) {
 		densities[i] = 0;
 	}
+	double start = omp_get_wtime();
+	calc_densities_by_serial();
+	//calc_densities_with_critical();
+	//calc_densities_with_atomic();
+	double total = omp_get_wtime() - start;
+	printf("\n\nComplete activity map caculation in %d seconds %f milliseconds\n", (int)total, 1000 * (total - (int)total));
+
+}
+
+/**
+ * Calculate density for the D*D locations (activity map) (seri)
+ */
+void calc_densities_by_serial() {
 	for (int i = 0; i < N; i++) {
 		nbody* body = &bodies[i];
 		double scale = 1.0 / D;
@@ -179,6 +189,51 @@ void calc_densities() {
 		densities[index] = densities[index] + 1.0 * D / N;
 	}
 }
+
+
+/**
+ * Calculate activity map with omp critical
+ */
+void calc_densities_with_critical() {
+	int i;
+	double scale = 1.0 / D;
+#pragma omp parallel for default(none) shared(densities, scale, N, D, bodies, forces) 
+	for (i = 0; i < N; i++) {
+		nbody* body = &bodies[i];
+		// x-axis coordinate of D*D locations
+		int x = (int)ceil(body->x / scale) - 1;
+		// y-axis coordinate of D*D locations
+		int y = (int)ceil(body->y / scale) - 1;
+		// the index of one dimensional array
+		int index = y * D + x;
+#pragma omp critical 
+		densities[index] += 1.0 * D / N;
+	}
+}
+
+/**
+ * Calculate activity map with omp atomic
+ */
+void calc_densities_with_atomic() {
+	int i;
+	double scale = 1.0 / D;
+#pragma omp parallel for default(none) shared(densities, scale, N, D, bodies, forces) 
+	for (i = 0; i < N; i++) {
+		nbody* body = &bodies[i];
+		// x-axis coordinate of D*D locations
+		int x = (int)ceil(body->x / scale) - 1;
+		// y-axis coordinate of D*D locations
+		int y = (int)ceil(body->y / scale) - 1;
+		// the index of one dimensional array
+		int index = y * D + x;
+#pragma omp atomic
+		densities[index] ++;
+	}
+	for (int i = 0; i < D * D; i++) {
+		densities[i] = densities[i] * D / N;
+	}
+}
+
 
 /**
  * Update location and velocity of n bodies
@@ -288,8 +343,9 @@ void load_data_from_file() {
 		bodies[i].vy = res[3] == NULL ? 0 : atof(res[3]);
 		bodies[i].m = res[4] == NULL ? 1.0 / N : atof(res[4]);
 		i++;
-		// free the res memory
+		// free the res memory 
 		for (int i = 0; i < PARAMS_NUM_INPUT; i++) {
+			// the VS 2019 will display a stupid warrning
 			if (res[i] != NULL) {
 				free(res[i]);
 			}
@@ -358,7 +414,7 @@ char* get_string_in_range(char string[], int start, int end) {
 char** split(const char* string, char dim, int size) {
 	int len = strlen(string);
 	char* new_string = (char*)calloc(len + 2, sizeof(char));
-	strcpy(new_string, string);
+	//strcpy(new_string, string);
 	new_string[strlen(new_string)] = dim;
 	char** res = (char**)malloc(size * sizeof(char*));
 	int i = 0, j = 0, start = 0, end = 0;
@@ -375,3 +431,5 @@ char** split(const char* string, char dim, int size) {
 	free(new_string);
 	return res;
 }
+
+zc
