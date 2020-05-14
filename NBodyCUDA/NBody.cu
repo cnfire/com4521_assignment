@@ -13,9 +13,10 @@
 
 #define USER_NAME "Xiaowei Zhu" 
 
-#define THREADS_PER_BLOCK 128
+#define THREADS_PER_BLOCK 64
 
 int N = 0;	// the number of bodies to simulate
+__device__ int d_N = 20;
 int D = 0;	// the integer dimension of the activity grid
 int I = 0;	// the number of simulation iterations
 MODE M;	// operation mode
@@ -23,6 +24,7 @@ char* input_file = NULL;	// input file with an initial N bodies of data
 nbody* bodies = NULL;
 float* densities;	// store the density values of the D*D locations (acitvity map)
 vector* forces;	// force(F) of every body
+__device__ vector* d_forces;
 
 // declaration of all functions
 void print_help();
@@ -171,40 +173,67 @@ void calc_forces_by_parallel() {
 	}
 }
 
-__global__ void testt(void) {
+__global__ void testt(nbody* d_bodies) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	printf("\ncuda:%d", i);
-}
+	if (i < d_N) {
+		//printf("\nthread.id:%d, value:%f", i, d_bodies[i].x);
+		// compute the force of every body
 
-void calc_forces_by_cuda() {
-	printf("look at here,\n");
-	float* d_bodies;
-	int size = N * sizeof(nbody);
-	cudaMalloc((void**)&d_bodies, size);
-	cudaMemcpy(d_bodies, bodies, size, cudaMemcpyHostToDevice);
-	testt << < N / THREADS_PER_BLOCK, THREADS_PER_BLOCK >> > ();
-	cudaDeviceSynchronise();
-	exit(0);
-
-	// compute the force of every body
-	for (int j = 0; j < N; j++) {
-		nbody* body_j = &bodies[j];
+		nbody* body_i = &d_bodies[i];
 		vector f = { 0, 0 };
-		for (int k = 0; k < N; k++) {
+		for (int k = 0; k < d_N; k++) {
 			// skip the influence of body on itself
-			if (k == j) continue;
-			nbody* body_k = &bodies[k];
-			vector s1 = { body_k->x - body_j->x, body_k->y - body_j->y };
+			if (k == i) continue;
+			nbody* body_k = &d_bodies[k];
+			vector s1 = { body_k->x - body_i->x, body_k->y - body_i->y };
 			vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
-			double s3 = pow(pow(s1.x, 2) + pow(s1.y, 2) + pow(SOFTENING, 2), 1.5);
+			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
-		f.x = G * body_j->m * f.x;
-		f.y = G * body_j->m * f.y;
-		forces[j].x = f.x;
-		forces[j].y = f.y;
+		f.x = G * body_i->m * f.x;
+		f.y = G * body_i->m * f.y;
+		d_forces[i].x = f.x;
+		d_forces[i].y = f.y;
+		printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);
 	}
+
+}
+
+void calc_forces_by_cuda() {
+	printf("look at here:%f,d_N:%d\n", bodies[0].x, d_N);
+	nbody* d_bodies;
+	int size = N * sizeof(nbody);
+	cudaMalloc((void**)&d_bodies, size);
+	cudaMemcpy(d_bodies, bodies, size, cudaMemcpyHostToDevice);
+	testt << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_bodies);
+	cudaDeviceSynchronize();
+	printf("\nlook at here,end,\n");
+	cudaMemcpyFromSymbol(forces, d_forces, N * sizeof(vector));
+	/*for (int i = 0; i < N; i++) {
+		printf("\n(%f,%f)", forces[i].x, forces[i].y);
+	}*/
+	exit(0);
+
+	//// compute the force of every body
+	//for (int j = 0; j < N; j++) {
+	//	nbody* body_j = &bodies[j];
+	//	vector f = { 0, 0 };
+	//	for (int k = 0; k < N; k++) {
+	//		// skip the influence of body on itself
+	//		if (k == j) continue;
+	//		nbody* body_k = &bodies[k];
+	//		vector s1 = { body_k->x - body_j->x, body_k->y - body_j->y };
+	//		vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
+	//		double s3 = pow(pow(s1.x, 2) + pow(s1.y, 2) + pow(SOFTENING, 2), 1.5);
+	//		f.x = f.x + s2.x / s3;
+	//		f.y = f.y + s2.y / s3;
+	//	}
+	//	f.x = G * body_j->m * f.x;
+	//	f.y = G * body_j->m * f.y;
+	//	forces[j].x = f.x;
+	//	forces[j].y = f.y;
+	//}
 }
 
 /**
@@ -331,6 +360,7 @@ void parse_parameter(int argc, char* argv[]) {
 		exit(0);
 	}
 	N = atoi(argv[1]);
+	cudaMemcpyToSymbol(d_N, &N, sizeof(int));
 	D = atoi(argv[2]);
 	M = str2enum(argv[3]);
 	if (argc >= 6) {
