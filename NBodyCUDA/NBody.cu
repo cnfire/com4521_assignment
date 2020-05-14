@@ -27,6 +27,9 @@ void load_data_from_file();
 void step(void);
 void calc_forces_by_serial();
 void calc_forces_by_parallel();
+
+void calc_forces_by_cuda();
+
 void calc_densities();
 void calc_densities_by_serial();
 void calc_densities_with_critical();
@@ -96,9 +99,15 @@ void step(void) {
 	else if (M == OPENMP) {
 		calc_forces_by_parallel();
 	}
+	else if (M == CUDA) {
+		calc_forces_by_cuda();
+	}
 	else {
 		fprintf(stderr, "\n%d mode is not supported", M);
 	}
+	
+	exit(0);
+
 	// Calculate density for the D*D locations (activity map)
 	calc_densities();
 	// Update location and velocity of n bodies
@@ -138,6 +147,32 @@ void calc_forces_by_parallel() {
 	int j;
 #pragma omp parallel for default(none) shared(N, bodies, forces) schedule(dynamic)
 	for (j = 0; j < N; j++) {
+		nbody* body_j = &bodies[j];
+		vector f = { 0, 0 };
+		for (int k = 0; k < N; k++) {
+			// skip the influence of body on itself
+			if (k == j) continue;
+			nbody* body_k = &bodies[k];
+			vector s1 = { body_k->x - body_j->x, body_k->y - body_j->y };
+			vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
+			double s3 = pow(pow(s1.x, 2) + pow(s1.y, 2) + pow(SOFTENING, 2), 1.5);
+			f.x = f.x + s2.x / s3;
+			f.y = f.y + s2.y / s3;
+		}
+		f.x = G * body_j->m * f.x;
+		f.y = G * body_j->m * f.y;
+		forces[j].x = f.x;
+		forces[j].y = f.y;
+	}
+}
+
+void calc_forces_by_cuda() {
+
+
+	float *
+
+	// compute the force of every body
+	for (int j = 0; j < N; j++) {
 		nbody* body_j = &bodies[j];
 		vector f = { 0, 0 };
 		for (int k = 0; k < N; k++) {
