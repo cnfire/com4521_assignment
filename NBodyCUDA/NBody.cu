@@ -45,6 +45,12 @@ void print_densities();
 char* get_string_in_range(char string[], int start, int end);
 char** split(const char* string, char dim, int size);
 
+__global__ void testt(void) {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	printf("\ncuda:%d", i);
+}
+
+
 int main(int argc, char* argv[]) {
 	// Processes the command line arguments
 	parse_parameter(argc, argv);
@@ -171,19 +177,13 @@ void calc_forces_by_parallel() {
 	}
 }
 
-__global__ void testt(void) {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	printf("\ncuda:%d", i);
-}
-
-
 void calc_forces_by_cuda() {
 	printf("look at here,\n");
 	float* d_bodies;
 	int size = N * sizeof(nbody);
 	cudaMalloc((void**)&d_bodies, size);
 	cudaMemcpy(d_bodies, bodies, size, cudaMemcpyHostToDevice);
-	testt << < 1000, THREADS_PER_BLOCK >> > ();
+	testt << < N / THREADS_PER_BLOCK, THREADS_PER_BLOCK >> > ();
 
 	// compute the force of every body
 	for (int j = 0; j < N; j++) {
