@@ -8,7 +8,12 @@
 #include "NBody.h"
 #include "NBodyVisualiser.h"
 
+#include "device_launch_parameters.h"
+#include <cuda_runtime.h>
+
 #define USER_NAME "Xiaowei Zhu" 
+
+#define THREADS_PER_BLOCK 128
 
 int N = 0;	// the number of bodies to simulate
 int D = 0;	// the integer dimension of the activity grid
@@ -105,7 +110,7 @@ void step(void) {
 	else {
 		fprintf(stderr, "\n%d mode is not supported", M);
 	}
-	
+
 	exit(0);
 
 	// Calculate density for the D*D locations (activity map)
@@ -166,10 +171,19 @@ void calc_forces_by_parallel() {
 	}
 }
 
+__global__ void testt(void) {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	printf("\ncuda:%d", i);
+}
+
+
 void calc_forces_by_cuda() {
-
-
-	float *
+	printf("look at here,\n");
+	float* d_bodies;
+	int size = N * sizeof(nbody);
+	cudaMalloc((void**)&d_bodies, size);
+	cudaMemcpy(d_bodies, bodies, size, cudaMemcpyHostToDevice);
+	testt << < 1000, THREADS_PER_BLOCK >> > ();
 
 	// compute the force of every body
 	for (int j = 0; j < N; j++) {
