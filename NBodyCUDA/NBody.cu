@@ -57,8 +57,9 @@ int main(int argc, char* argv[]) {
 	}
 	//print_bodies();
 	// Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
+	char* mode = M == CPU ? "CPU" : M == OPENMP ? "OPENMP" : "CUDA";
 	if (I == 0) {
-		printf("\n\nStart simulate by visualisation mode with %s computing...", M == CPU ? "CPU" : "OPENMP");
+		printf("\n\nStart simulate by visualisation mode with %s computing...", mode);
 		initViewer(N, D, M, step);
 		setNBodyPositions(bodies);
 		//setActivityMapData(densities);
@@ -66,7 +67,7 @@ int main(int argc, char* argv[]) {
 		startVisualisationLoop();
 	}
 	else {
-		printf("\n\nStart simulate by console mode with %s computing...", M == CPU ? "CPU" : "OPENMP");
+		printf("\n\nStart simulate by console mode with %s computing...", mode);
 		// start timer
 		double begin_outer = omp_get_wtime();
 		for (int i = 0; i < I; i++) {
