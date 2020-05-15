@@ -24,6 +24,7 @@ char* input_file = NULL;	// input file with an initial N bodies of data
 nbody* bodies = NULL;
 __device__ nbody* d_bodies;
 float* densities;	// store the density values of the D*D locations (acitvity map)
+__device__ float* densities;
 vector* forces;	// force(F) of every body
 __device__ vector* d_forces;
 
@@ -36,7 +37,7 @@ void step(void);
 void calc_forces_by_serial();
 void calc_forces_by_parallel();
 
-void calc_forces_by_cuda();
+__global__ void calc_forces_by_cuda(nbody* d_bodies, vector* d_forces);
 
 void calc_densities();
 void calc_densities_by_serial();
@@ -123,23 +124,38 @@ void step(void) {
 	// compute the force of every body with different way
 	if (M == CPU) {
 		calc_forces_by_serial();
+		// Calculate density for the D*D locations (activity map)
+		calc_densities();
+		// Update location and velocity of n bodies
+		update_location_velocity();
 	}
 	else if (M == OPENMP) {
 		calc_forces_by_parallel();
+		// Calculate density for the D*D locations (activity map)
+		calc_densities();
+		// Update location and velocity of n bodies
+		update_location_velocity();
 	}
 	else if (M == CUDA) {
-		calc_forces_by_cuda();
+		calc_forces_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_bodies, d_forces);
+		cudaDeviceSynchronize();
+		checkCUDAErrors("calc_forces_by_cuda");
+
+		calc_densities_by_cuda();
+
+		//cudaMemcpyFromSymbol(forces, d_forces, N * sizeof(vector));
+
+		/*for (int i = 0; i < N; i++) {
+			printf("\n(%f,%f)", forces[i].x, forces[i].y);
+		}*/
 	}
 	else {
 		fprintf(stderr, "\n%d mode is not supported", M);
 	}
 
-	exit(0);
+	//exit(0);
 
-	// Calculate density for the D*D locations (activity map)
-	calc_densities();
-	// Update location and velocity of n bodies
-	update_location_velocity();
+
 }
 
 /**
@@ -205,26 +221,7 @@ void checkCUDAErrors(const char* msg) {
 }
 
 
-__device__ float* d_ages;
-__global__ void tesages(float* d_ages) {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	printf("\nthread:%d,%f", i, d_ages[0]);
-}
-void calc_forces_by_cuda__() {
-	int size = 3 * sizeof(float);
-	float* ages = (float*)calloc(3, sizeof(float));
-	ages[0] = 9.9f;
-	cudaMalloc((void**)&d_ages, size);
-	cudaMemcpy(d_ages, ages, size, cudaMemcpyHostToDevice);
-	checkCUDAErrors("cuda memory copy xxx");
-
-	tesages << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_ages);
-	cudaDeviceSynchronize();
-	checkCUDAErrors("compute on device");
-}
-
-
-__global__ void testt(nbody* d_bodies, vector* d_forces) {
+__global__ void calc_forces_by_cuda(nbody* d_bodies, vector* d_forces) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		printf("\nthread.id:%d", i);
@@ -246,49 +243,8 @@ __global__ void testt(nbody* d_bodies, vector* d_forces) {
 		f.y = G * body_i->m * f.y;
 		d_forces[i].x = f.x;
 		d_forces[i].y = f.y;
-		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);
+		printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);
 	}
-
-}
-
-
-void calc_forces_by_cuda() {
-	printf("look at here:%f\n", bodies[0].x);
-	//print_bodies();
-
-	testt << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_bodies, d_forces);
-	cudaDeviceSynchronize();
-	checkCUDAErrors("fuck2");
-	printf("\nlook at here,end,\n");
-	//cudaMemcpyFromSymbol(forces, d_forces, N * sizeof(vector));
-
-
-
-
-	/*for (int i = 0; i < N; i++) {
-		printf("\n(%f,%f)", forces[i].x, forces[i].y);
-	}*/
-	exit(0);
-
-	//// compute the force of every body
-	//for (int j = 0; j < N; j++) {
-	//	nbody* body_j = &bodies[j];
-	//	vector f = { 0, 0 };
-	//	for (int k = 0; k < N; k++) {
-	//		// skip the influence of body on itself
-	//		if (k == j) continue;
-	//		nbody* body_k = &bodies[k];
-	//		vector s1 = { body_k->x - body_j->x, body_k->y - body_j->y };
-	//		vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
-	//		double s3 = pow(pow(s1.x, 2) + pow(s1.y, 2) + pow(SOFTENING, 2), 1.5);
-	//		f.x = f.x + s2.x / s3;
-	//		f.y = f.y + s2.y / s3;
-	//	}
-	//	f.x = G * body_j->m * f.x;
-	//	f.y = G * body_j->m * f.y;
-	//	forces[j].x = f.x;
-	//	forces[j].y = f.y;
-	//}
 }
 
 /**
@@ -364,6 +320,12 @@ void calc_densities_with_atomic() {
 		densities[i] = densities[i] * D / N;
 	}
 }
+
+__global__ void calc_densities_by_cuda() {
+
+
+}
+
 
 
 /**
