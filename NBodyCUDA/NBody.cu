@@ -16,7 +16,7 @@
 #define THREADS_PER_BLOCK 64
 
 int N = 0;	// the number of bodies to simulate
-__device__ int d_N = 20;
+__constant__ int d_N = 0;
 int D = 0;	// the integer dimension of the activity grid
 int I = 0;	// the number of simulation iterations
 MODE M;	// operation mode
@@ -24,7 +24,7 @@ char* input_file = NULL;	// input file with an initial N bodies of data
 nbody* bodies = NULL;
 __device__ nbody* d_bodies;
 float* densities;	// store the density values of the D*D locations (acitvity map)
-__device__ float* densities;
+__device__ float* d_densities;
 vector* forces;	// force(F) of every body
 __device__ vector* d_forces;
 
@@ -63,6 +63,7 @@ int main(int argc, char* argv[]) {
 
 	// allocate for cuda
 	if (M == CUDA) {
+		cudaMemcpyToSymbol(d_N, &N, sizeof(int));
 		cudaMalloc((void**)&d_forces, N * sizeof(vector));
 		cudaMalloc((void**)&d_bodies, N * sizeof(nbody));
 		checkCUDAErrors("cuda malloc");
@@ -117,6 +118,31 @@ int main(int argc, char* argv[]) {
 	return 0;
 }
 
+
+__device__ float* d_ages;
+
+__global__ void tesages() {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	printf("\nthread:%d,%f", i, d_ages[0]);
+}
+
+void test_cuda() {
+	int size = 3 * sizeof(float);
+	float* h_ages = (float*)malloc(size);
+	h_ages[0] = 8.8f;
+	float* hd_ages = nullptr;
+	cudaMalloc((void**)&hd_ages, size);
+	checkCUDAErrors("cuda malloc 1");
+	cudaMemcpyToSymbol(d_ages, &hd_ages, sizeof(float*));
+	checkCUDAErrors("cuda memory copy 2");
+	cudaMemcpy(hd_ages, h_ages, size, cudaMemcpyHostToDevice);
+	checkCUDAErrors("cuda memory copy 3");
+
+	tesages << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+	cudaDeviceSynchronize();
+	checkCUDAErrors("compute on device");
+}
+
 /**
  * Perform the main simulation of the NBody system (Simulation within a single iteration)
  */
@@ -137,11 +163,12 @@ void step(void) {
 		update_location_velocity();
 	}
 	else if (M == CUDA) {
+		test_cuda(); exit(0);
 		calc_forces_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_bodies, d_forces);
 		cudaDeviceSynchronize();
 		checkCUDAErrors("calc_forces_by_cuda");
 
-		calc_densities_by_cuda();
+		//calc_densities_by_cuda();
 
 		//cudaMemcpyFromSymbol(forces, d_forces, N * sizeof(vector));
 
@@ -154,8 +181,6 @@ void step(void) {
 	}
 
 	//exit(0);
-
-
 }
 
 /**
@@ -377,7 +402,6 @@ void parse_parameter(int argc, char* argv[]) {
 		exit(0);
 	}
 	N = atoi(argv[1]);
-	cudaMemcpyToSymbol(d_N, &N, sizeof(int));
 	D = atoi(argv[2]);
 	M = str2enum(argv[3]);
 	if (argc >= 6) {
