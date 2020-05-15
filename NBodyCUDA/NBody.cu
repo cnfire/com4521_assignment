@@ -18,6 +18,7 @@
 int N = 0;	// the number of bodies to simulate
 __constant__ int d_N = 0;
 int D = 0;	// the integer dimension of the activity grid
+__constant__ int d_D = 0;
 int I = 0;	// the number of simulation iterations
 MODE M;	// operation mode
 char* input_file = NULL;	// input file with an initial N bodies of data
@@ -38,6 +39,7 @@ void calc_forces_by_serial();
 void calc_forces_by_parallel();
 
 __global__ void calc_forces_by_cuda(nbody* d_bodies, vector* d_forces);
+__global__ void calc_densities_by_cuda(nbody* d_bodies);
 
 void calc_densities();
 void calc_densities_by_serial();
@@ -64,9 +66,18 @@ int main(int argc, char* argv[]) {
 	// allocate for cuda
 	if (M == CUDA) {
 		cudaMemcpyToSymbol(d_N, &N, sizeof(int));
+		cudaMemcpyToSymbol(d_D, &D, sizeof(int));
+
+
 		cudaMalloc((void**)&d_forces, N * sizeof(vector));
 		cudaMalloc((void**)&d_bodies, N * sizeof(nbody));
 		checkCUDAErrors("cuda malloc");
+
+		float* hd_densities = nullptr;
+		cudaMalloc((void**)&hd_densities, D * D * sizeof(float));
+		checkCUDAErrors("cuda malloc d_densities");
+		cudaMemcpyToSymbol(d_densities, &hd_densities, sizeof(hd_densities));
+
 	}
 
 	//cudaMemcpy(d_forces, forces, N * sizeof(vector), cudaMemcpyHostToDevice);
@@ -119,29 +130,29 @@ int main(int argc, char* argv[]) {
 }
 
 
-__device__ float* d_ages;
-
-__global__ void tesages() {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	printf("\nthread:%d,%f", i, d_ages[0]);
-}
-
-void test_cuda() {
-	int size = 3 * sizeof(float);
-	float* h_ages = (float*)malloc(size);
-	h_ages[0] = 8.8f;
-	float* hd_ages = nullptr;
-	cudaMalloc((void**)&hd_ages, size);
-	checkCUDAErrors("cuda malloc 1");
-	cudaMemcpyToSymbol(d_ages, &hd_ages, sizeof(float*));
-	checkCUDAErrors("cuda memory copy 2");
-	cudaMemcpy(hd_ages, h_ages, size, cudaMemcpyHostToDevice);
-	checkCUDAErrors("cuda memory copy 3");
-
-	tesages << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-	cudaDeviceSynchronize();
-	checkCUDAErrors("compute on device");
-}
+//__device__ float* d_ages;
+//
+//__global__ void tesages() {
+//	int i = blockIdx.x * blockDim.x + threadIdx.x;
+//	printf("\nthread:%d,%f", i, d_ages[0]);
+//}
+//
+//void test_cuda() {
+//	int size = 3 * sizeof(float);
+//	float* h_ages = (float*)malloc(size);
+//	h_ages[0] = 8.8f;
+//	float* hd_ages = nullptr;
+//	cudaMalloc((void**)&hd_ages, size);
+//	checkCUDAErrors("cuda malloc 1");
+//	cudaMemcpyToSymbol(d_ages, &hd_ages, sizeof(float*));
+//	checkCUDAErrors("cuda memory copy 2");
+//	cudaMemcpy(hd_ages, h_ages, size, cudaMemcpyHostToDevice);
+//	checkCUDAErrors("cuda memory copy 3");
+//
+//	tesages << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+//	cudaDeviceSynchronize();
+//	checkCUDAErrors("compute on device");
+//}
 
 /**
  * Perform the main simulation of the NBody system (Simulation within a single iteration)
@@ -163,12 +174,11 @@ void step(void) {
 		update_location_velocity();
 	}
 	else if (M == CUDA) {
-		test_cuda(); exit(0);
+		//test_cuda(); exit(0);
 		calc_forces_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_bodies, d_forces);
 		cudaDeviceSynchronize();
 		checkCUDAErrors("calc_forces_by_cuda");
-
-		//calc_densities_by_cuda();
+		calc_densities_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_bodies);
 
 		//cudaMemcpyFromSymbol(forces, d_forces, N * sizeof(vector));
 
@@ -346,9 +356,20 @@ void calc_densities_with_atomic() {
 	}
 }
 
-__global__ void calc_densities_by_cuda() {
-
-
+__global__ void calc_densities_by_cuda(nbody* d_bodies) {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < d_N) {
+		nbody* body = &d_bodies[i];
+		double scale = 1.0 / d_D;
+		// x-axis coordinate of D*D locations
+		int x = (int)ceil(body->x / scale) - 1;
+		// y-axis coordinate of D*D locations
+		int y = (int)ceil(body->y / scale) - 1;
+		// the index of one dimensional array
+		int index = y * d_D + x;
+		d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
+		printf("\nd:%f", d_densities[index]);
+	}
 }
 
 
