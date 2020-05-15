@@ -27,8 +27,6 @@ float* densities;	// store the density values of the D*D locations (acitvity map
 vector* forces;	// force(F) of every body
 __device__ vector* d_forces;
 
-__device__ float* ages;
-
 // declaration of all functions
 void print_help();
 void parse_parameter(int argc, char* argv[]);
@@ -62,7 +60,13 @@ int main(int argc, char* argv[]) {
 	densities = (float*)calloc(D * D, sizeof(float));
 	forces = (vector*)malloc(N * sizeof(vector));
 
-	//cudaMalloc((void**)&d_forces, N * sizeof(vector));
+	// allocate for cuda
+	if (M == CUDA) {
+		cudaMalloc((void**)&d_forces, N * sizeof(vector));
+		cudaMalloc((void**)&d_bodies, N * sizeof(nbody));
+		checkCUDAErrors("cuda malloc");
+	}
+
 	//cudaMemcpy(d_forces, forces, N * sizeof(vector), cudaMemcpyHostToDevice);
 	//checkCUDAErrors("IJIE");
 	//cudaMemcpy(d_forces, forces, N * sizeof(vector), cudaMemcpyHostToDevice);
@@ -78,6 +82,11 @@ int main(int argc, char* argv[]) {
 		load_data_from_file();
 	}
 	//print_bodies();
+	if (M == CUDA) {
+		cudaMemcpy(d_bodies, bodies, N * sizeof(nbody), cudaMemcpyHostToDevice);
+		checkCUDAErrors("cuda memecpy");
+	}
+
 	// Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
 	char* mode = M == CPU ? "CPU" : M == OPENMP ? "OPENMP" : "CUDA";
 	if (I == 0) {
@@ -195,84 +204,61 @@ void checkCUDAErrors(const char* msg) {
 	}
 }
 
-cudaError_t checkAndPrint(const char* name, int sync) {
-	cudaError_t err = cudaGetLastError();
-	if (err != cudaSuccess)
-	{
-		const char* errorMessage = cudaGetErrorString(err);
-		fprintf(stderr, "CUDA error check \"%s\" returned ERROR code: %d (%s) %s \n", name, err, errorMessage, (sync) ? "after sync" : "");
-	}
-	else if (1) {
-		printf("CUDA error check \"%s\" executed successfully %s\n", name, (sync) ? "after sync" : "");
-	}
-	return err;
-}
-cudaError_t checkCUDAError2(const char* name, int sync) {
-	cudaError_t err = cudaSuccess;
-	if (sync || 0) {
-		err = checkAndPrint(name, 0);
-		cudaDeviceSynchronize();
-		err = checkAndPrint(name, 1);
-	}
-	else {
-		err = checkAndPrint(name, 0);
-	}
-	return err;
-}
-
-__global__ void testt() {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i < d_N) {
-		printf("\nthread.id:%d, value:%f", i, d_bodies[i].x);
-		// compute the force of every body
-
-		//nbody* body_i = &d_bodies[i];
-		//vector f = { 0, 0 };
-		//for (int k = 0; k < d_N; k++) {
-		//	// skip the influence of body on itself
-		//	if (k == i) continue;
-		//	nbody* body_k = &d_bodies[k];
-		//	vector s1 = { body_k->x - body_i->x, body_k->y - body_i->y };
-		//	vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
-		//	double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
-		//	f.x = f.x + s2.x / s3;
-		//	f.y = f.y + s2.y / s3;
-		//}
-		//f.x = G * body_i->m * f.x;
-		//f.y = G * body_i->m * f.y;
-		//d_forces[i].x = f.x;
-		//d_forces[i].y = f.y;
-		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);
-
-	}
-
-}
 
 __device__ float* d_ages;
+__global__ void tesages(float* d_ages) {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	printf("\nthread:%d,%f", i, d_ages[0]);
+}
+void calc_forces_by_cuda__() {
+	int size = 3 * sizeof(float);
+	float* ages = (float*)calloc(3, sizeof(float));
+	ages[0] = 9.9f;
+	cudaMalloc((void**)&d_ages, size);
+	cudaMemcpy(d_ages, ages, size, cudaMemcpyHostToDevice);
+	checkCUDAErrors("cuda memory copy xxx");
+
+	tesages << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_ages);
+	cudaDeviceSynchronize();
+	checkCUDAErrors("compute on device");
+}
+
+
+__global__ void testt(nbody* d_bodies, vector* d_forces) {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < d_N) {
+		printf("\nthread.id:%d", i);
+		//printf("\nthread.id:%d, value:%f", i, d_bodies[i].x);
+		// compute the force of every body
+		nbody* body_i = &d_bodies[i];
+		vector f = { 0, 0 };
+		for (int k = 0; k < d_N; k++) {
+			// skip the influence of body on itself
+			if (k == i) continue;
+			nbody* body_k = &d_bodies[k];
+			vector s1 = { body_k->x - body_i->x, body_k->y - body_i->y };
+			vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
+			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
+			f.x = f.x + s2.x / s3;
+			f.y = f.y + s2.y / s3;
+		}
+		f.x = G * body_i->m * f.x;
+		f.y = G * body_i->m * f.y;
+		d_forces[i].x = f.x;
+		d_forces[i].y = f.y;
+		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);
+	}
+
+}
+
 
 void calc_forces_by_cuda() {
-	int size1 = 3 * sizeof(float);
-	float* ages = (float*)calloc(3, sizeof(float));
-	cudaMalloc((void**)&d_ages, size1);
-	cudaMemcpyToSymbol(d_ages, &ages, size1);
-	checkCUDAErrors("Cuda memory copy");
-	exit(0);
-
 	printf("look at here:%f\n", bodies[0].x);
-	print_bodies();
+	//print_bodies();
 
-	int size = N * sizeof(nbody);
-	cudaMalloc((void**)&d_bodies, size);
-	checkCUDAErrors("Cuda malloc ");
-	//cudaMemcpy(d_bodies, bodies, size, cudaMemcpyHostToDevice);
-	cudaMemcpyToSymbol(d_bodies, &bodies, size);
-	checkCUDAErrors("Cuda memory copy");
-	exit(0);
-
-	testt << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+	testt << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_bodies, d_forces);
 	cudaDeviceSynchronize();
 	checkCUDAErrors("fuck2");
-	//checkCUDAError2("fuck3", 0);
 	printf("\nlook at here,end,\n");
 	//cudaMemcpyFromSymbol(forces, d_forces, N * sizeof(vector));
 
