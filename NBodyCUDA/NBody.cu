@@ -269,8 +269,6 @@ void checkCUDAErrors(const char* msg) {
 __global__ void calc_forces_by_cuda() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
-		//printf("\nthread.id:%d", i);
-		//printf("\nthread.id:%d, value:%f", i, d_bodies[i].x);
 		// compute the force of every body
 		nbody* body_i = &d_bodies[i];
 		vector f = { 0, 0 };
@@ -288,9 +286,11 @@ __global__ void calc_forces_by_cuda() {
 		f.y = G * body_i->m * f.y;
 		d_forces[i].x = f.x;
 		d_forces[i].y = f.y;
-		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);
+		printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);//(x:-0.010679,y:-0.046293)
 	}
 }
+
+
 
 /**
  * Calculate activity map
