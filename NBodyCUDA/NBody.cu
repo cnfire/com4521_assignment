@@ -413,7 +413,8 @@ __global__ void calc_densities_by_cuda() {
 		// the index of one dimensional array
 		int index = y * d_D + x;
 		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
-		d_densities[index] = atomicAdd_system(d_densities[index], 1.0 * d_D / d_N);
+		//atomicAdd(d_densities[index], 1.0 * d_D / d_N);
+		atomicAdd(null, 1.0 * d_D / d_N);
 		//printf("\nd:%f", d_densities[index]);
 	}
 }
