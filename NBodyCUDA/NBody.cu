@@ -38,8 +38,9 @@ void step(void);
 void calc_forces_by_serial();
 void calc_forces_by_parallel();
 
-__global__ void calc_forces_by_cuda(nbody* d_bodies, vector* d_forces);
-__global__ void calc_densities_by_cuda(nbody* d_bodies);
+//__global__ void calc_forces_by_cuda(nbody* d_bodies, vector* d_forces);
+__global__ void calc_forces_by_cuda();
+__global__ void calc_densities_by_cuda();
 
 void calc_densities();
 void calc_densities_by_serial();
@@ -68,22 +69,25 @@ int main(int argc, char* argv[]) {
 		cudaMemcpyToSymbol(d_N, &N, sizeof(int));
 		cudaMemcpyToSymbol(d_D, &D, sizeof(int));
 
-
-		cudaMalloc((void**)&d_forces, N * sizeof(vector));
+		/*cudaMalloc((void**)&d_forces, N * sizeof(vector));
 		cudaMalloc((void**)&d_bodies, N * sizeof(nbody));
-		checkCUDAErrors("cuda malloc");
+		checkCUDAErrors("cuda malloc");*/
+
+		float* hd_forces = nullptr;
+		cudaMalloc((void**)&hd_forces, D * D * sizeof(float));
+		checkCUDAErrors("cuda malloc d_forces");
+		cudaMemcpyToSymbol(d_forces, &hd_forces, sizeof(hd_forces));
+
+		float* hd_bodies = nullptr;
+		cudaMalloc((void**)&hd_bodies, D * D * sizeof(float));
+		checkCUDAErrors("cuda malloc d_bodies");
+		cudaMemcpyToSymbol(d_bodies, &hd_bodies, sizeof(hd_bodies));
 
 		float* hd_densities = nullptr;
 		cudaMalloc((void**)&hd_densities, D * D * sizeof(float));
 		checkCUDAErrors("cuda malloc d_densities");
 		cudaMemcpyToSymbol(d_densities, &hd_densities, sizeof(hd_densities));
-
 	}
-
-	//cudaMemcpy(d_forces, forces, N * sizeof(vector), cudaMemcpyHostToDevice);
-	//checkCUDAErrors("IJIE");
-	//cudaMemcpy(d_forces, forces, N * sizeof(vector), cudaMemcpyHostToDevice);
-	//cudaMemcpyToSymbol(d_forces, &forces, N * sizeof(vector));
 
 	// Depending on program arguments, either read initial data from file or generate random data.
 	if (input_file == NULL) {
@@ -175,10 +179,10 @@ void step(void) {
 	}
 	else if (M == CUDA) {
 		//test_cuda(); exit(0);
-		calc_forces_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_bodies, d_forces);
+		calc_forces_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 		cudaDeviceSynchronize();
 		checkCUDAErrors("calc_forces_by_cuda");
-		calc_densities_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > (d_bodies);
+		calc_densities_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 
 		//cudaMemcpyFromSymbol(forces, d_forces, N * sizeof(vector));
 
@@ -256,7 +260,7 @@ void checkCUDAErrors(const char* msg) {
 }
 
 
-__global__ void calc_forces_by_cuda(nbody* d_bodies, vector* d_forces) {
+__global__ void calc_forces_by_cuda() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		printf("\nthread.id:%d", i);
@@ -356,7 +360,7 @@ void calc_densities_with_atomic() {
 	}
 }
 
-__global__ void calc_densities_by_cuda(nbody* d_bodies) {
+__global__ void calc_densities_by_cuda() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		nbody* body = &d_bodies[i];
