@@ -120,7 +120,6 @@ int main(int argc, char* argv[]) {
 			setHistogramData(d_densities);
 			startVisualisationLoop();
 		}
-
 	}
 	else {
 		printf("\n\nStart simulate by console mode with %s computing...", mode);
@@ -131,8 +130,9 @@ int main(int argc, char* argv[]) {
 			step();
 			double elapsed = omp_get_wtime() - begin;
 			printf("\n\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
+			//print_bodies();
 		}
-		//print_bodies();
+		
 		//print_densities();
 		// stop timer
 		double total = omp_get_wtime() - begin_outer;
@@ -299,7 +299,7 @@ __global__ void calc_forces_by_cuda() {
 		f.y = G * body_i->m * f.y;
 		d_forces[i].x = f.x;
 		d_forces[i].y = f.y;
-		printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);
+		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);
 	}
 }
 
