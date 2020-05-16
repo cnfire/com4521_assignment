@@ -209,10 +209,11 @@ void step(void) {
 		//print_bodies();
 
 		reset_d_densities << <1, 1 >> > ();
-		cudaDeviceSynchronize();
+		//cudaDeviceSynchronize();
 		checkCUDAErrors("reset_d_densities");
-		calc_densities_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-		cudaDeviceSynchronize();
+		//calc_densities_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+		calc_densities_by_cuda << < 1, 1 >> > ();
+		//cudaDeviceSynchronize();
 		checkCUDAErrors("calc_densities_by_cuda");
 
 		update_location_velocity_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
@@ -401,7 +402,7 @@ __global__ void reset_d_densities() {
 	}
 }
 
-__global__ void calc_densities_by_cuda() {
+__global__ void calc_densities_by_cuda2() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		nbody* body = &d_bodies[i];
@@ -414,8 +415,26 @@ __global__ void calc_densities_by_cuda() {
 		int index = y * d_D + x;
 		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
 		//atomicAdd(d_densities[index], 1.0 * d_D / d_N);
-		atomicAdd(null, 1.0 * d_D / d_N);
+		//atomicAdd(null, 1.0 * d_D / d_N);
 		//printf("\nd:%f", d_densities[index]);
+	}
+}
+
+__global__ void calc_densities_by_cuda() {
+	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
+		printf("error: No more than one thread. ");
+		return;
+	}
+	for (int i = 0; i < d_N; i++) {
+		nbody* body = &d_bodies[i];
+		double scale = 1.0 / d_D;
+		// x-axis coordinate of D*D locations
+		int x = (int)ceil(body->x / scale) - 1;
+		// y-axis coordinate of D*D locations
+		int y = (int)ceil(body->y / scale) - 1;
+		// the index of one dimensional array
+		int index = y * d_D + x;
+		d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
 	}
 }
 
