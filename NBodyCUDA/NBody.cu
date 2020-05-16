@@ -13,7 +13,7 @@
 
 #define USER_NAME "Xiaowei Zhu" 
 
-#define THREADS_PER_BLOCK 64
+#define THREADS_PER_BLOCK 128
 
 int N = 0;	// the number of bodies to simulate
 __constant__ int d_N = 0;
@@ -148,32 +148,6 @@ int main(int argc, char* argv[]) {
 	}
 	return 0;
 }
-
-
-//__device__ float* d_ages;
-//
-//__global__ void tesages() {
-//	int i = blockIdx.x * blockDim.x + threadIdx.x;
-//	printf("\nthread:%d,%f", i, d_ages[0]);
-//}
-//
-//void test_cuda() {
-//	int size = 3 * sizeof(float);
-//	float* h_ages = (float*)malloc(size);
-//	h_ages[0] = 8.8f;
-//	float* hd_ages = nullptr;
-//	cudaMalloc((void**)&hd_ages, size);
-//	checkCUDAErrors("cuda malloc 1");
-//	cudaMemcpyToSymbol(d_ages, &hd_ages, sizeof(float*));
-//	checkCUDAErrors("cuda memory copy 2");
-//	cudaMemcpy(hd_ages, h_ages, size, cudaMemcpyHostToDevice);
-//	checkCUDAErrors("cuda memory copy 3");
-//
-//	tesages << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-//	cudaDeviceSynchronize();
-//	checkCUDAErrors("compute on device");
-//}
-
 
 /**
  * Perform the main simulation of the NBody system (Simulation within a single iteration)
