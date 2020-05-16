@@ -107,11 +107,20 @@ int main(int argc, char* argv[]) {
 	char* mode = M == CPU ? "CPU" : M == OPENMP ? "OPENMP" : "CUDA";
 	if (I == 0) {
 		printf("\n\nStart simulate by visualisation mode with %s computing...", mode);
-		initViewer(N, D, M, step);
-		setNBodyPositions(bodies);
-		//setActivityMapData(densities);
-		setHistogramData(densities);
-		startVisualisationLoop();
+		if (!M == CUDA) {
+			initViewer(N, D, M, step);
+			setNBodyPositions(bodies);
+			//setActivityMapData(densities);
+			setHistogramData(densities);
+			startVisualisationLoop();
+		}
+		else {
+			initViewer(N, D, M, step);
+			setNBodyPositions(d_bodies);
+			setHistogramData(d_densities);
+			startVisualisationLoop();
+		}
+
 	}
 	else {
 		printf("\n\nStart simulate by console mode with %s computing...", mode);
