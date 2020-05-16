@@ -155,6 +155,16 @@ int main(int argc, char* argv[]) {
 //	checkCUDAErrors("compute on device");
 //}
 
+
+__global__ void reset_d_densities() {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i > 0) {
+		printf("error: No more than one thread ");
+		return;
+	}
+	printf("\nreset_d_densities:%d", i);
+
+}
 /**
  * Perform the main simulation of the NBody system (Simulation within a single iteration)
  */
@@ -179,9 +189,10 @@ void step(void) {
 		calc_forces_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 		cudaDeviceSynchronize();
 		checkCUDAErrors("calc_forces_by_cuda");
+		//cudaMemcpyFromSymbol(bodies, d_bodies, N * sizeof(nbody));
+		//print_bodies();
+		reset_d_densities << <1, 1 >> > ();
 		calc_densities_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-
-		//cudaMemcpyFromSymbol(forces, d_forces, N * sizeof(vector));
 
 		/*for (int i = 0; i < N; i++) {
 			printf("\n(%f,%f)", forces[i].x, forces[i].y);
@@ -260,7 +271,7 @@ void checkCUDAErrors(const char* msg) {
 __global__ void calc_forces_by_cuda() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
-		printf("\nthread.id:%d", i);
+		//printf("\nthread.id:%d", i);
 		//printf("\nthread.id:%d, value:%f", i, d_bodies[i].x);
 		// compute the force of every body
 		nbody* body_i = &d_bodies[i];
