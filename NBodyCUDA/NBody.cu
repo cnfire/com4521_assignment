@@ -41,6 +41,8 @@ void calc_forces_by_parallel();
 //__global__ void calc_forces_by_cuda(nbody* d_bodies, vector* d_forces);
 __global__ void calc_forces_by_cuda();
 __global__ void calc_densities_by_cuda();
+__global__ void reset_d_densities();
+__global__ void update_location_velocity_by_cuda();
 
 void calc_densities();
 void calc_densities_by_serial();
@@ -156,15 +158,6 @@ int main(int argc, char* argv[]) {
 //}
 
 
-__global__ void reset_d_densities() {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i > 0) {
-		printf("error: No more than one thread ");
-		return;
-	}
-	printf("\nreset_d_densities:%d", i);
-
-}
 /**
  * Perform the main simulation of the NBody system (Simulation within a single iteration)
  */
@@ -191,8 +184,15 @@ void step(void) {
 		checkCUDAErrors("calc_forces_by_cuda");
 		//cudaMemcpyFromSymbol(bodies, d_bodies, N * sizeof(nbody));
 		//print_bodies();
+
 		reset_d_densities << <1, 1 >> > ();
+		cudaDeviceSynchronize();
+		checkCUDAErrors("reset_d_densities");
 		calc_densities_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+		cudaDeviceSynchronize();
+		checkCUDAErrors("calc_densities_by_cuda");
+
+		update_location_velocity_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 
 		/*for (int i = 0; i < N; i++) {
 			printf("\n(%f,%f)", forces[i].x, forces[i].y);
@@ -368,6 +368,19 @@ void calc_densities_with_atomic() {
 	}
 }
 
+
+__global__ void reset_d_densities() {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i > 0) {
+		printf("error: No more than one thread ");
+		return;
+	}
+	for (int i = 0; i < d_D * d_D; i++) {
+		d_densities[i] = 0;
+	}
+	printf("\nreset_d_densities:%d", i);
+}
+
 __global__ void calc_densities_by_cuda() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
@@ -380,7 +393,7 @@ __global__ void calc_densities_by_cuda() {
 		// the index of one dimensional array
 		int index = y * d_D + x;
 		d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
-		printf("\nd:%f", d_densities[index]);
+		//printf("\nd:%f", d_densities[index]);
 	}
 }
 
@@ -394,6 +407,23 @@ void update_location_velocity() {
 		nbody* body = &bodies[i];
 		// calc the acceleration of body
 		vector a = { forces[i].x / body->m, forces[i].y / body->m };
+		// new velocity
+		vector v_new = { body->vx + dt * a.x, body->vy + dt * a.y };
+		// new location
+		vector l_new = { body->x + dt * v_new.x, body->y + dt * v_new.y };
+		body->x = l_new.x;
+		body->y = l_new.y;
+		body->vx = v_new.x;
+		body->vy = v_new.y;
+	}
+}
+
+__global__ void update_location_velocity_by_cuda() {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < d_N) {
+		nbody* body = &d_bodies[i];
+		// calc the acceleration of body
+		vector a = { d_forces[i].x / body->m, d_forces[i].y / body->m };
 		// new velocity
 		vector v_new = { body->vx + dt * a.x, body->vy + dt * a.y };
 		// new location
