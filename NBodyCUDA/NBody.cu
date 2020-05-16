@@ -190,7 +190,7 @@ void step(void) {
 		//cudaDeviceSynchronize();
 		checkCUDAErrors("calc_densities_by_cuda");
 
-		update_location_velocity_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+		//update_location_velocity_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 		cudaDeviceSynchronize();
 		checkCUDAErrors("update_location_velocity_by_cuda");
 		/*for (int i = 0; i < N; i++) {
@@ -286,7 +286,18 @@ __global__ void calc_forces_by_cuda() {
 		f.y = G * body_i->m * f.y;
 		d_forces[i].x = f.x;
 		d_forces[i].y = f.y;
-		printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);//(x:-0.010679,y:-0.046293)
+		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);//(x:-0.010679,y:-0.046293)
+
+		// calc the acceleration of body
+		vector a = { d_forces[i].x / body_i->m, d_forces[i].y / body_i->m };
+		// new velocity
+		vector v_new = { body_i->vx + dt * a.x, body_i->vy + dt * a.y };
+		// new location
+		vector l_new = { body_i->x + dt * v_new.x, body_i->y + dt * v_new.y };
+		body_i->x = l_new.x;
+		body_i->y = l_new.y;
+		body_i->vx = v_new.x;
+		body_i->vy = v_new.y;
 	}
 }
 
