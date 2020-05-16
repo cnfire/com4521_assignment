@@ -59,35 +59,9 @@ int main(int argc, char* argv[]) {
 	parse_parameter(argc, argv);
 	// Allocate any heap memory
 	bodies = (nbody*)malloc(N * sizeof(nbody));
-
 	// initialize all values are zero
 	densities = (float*)calloc(D * D, sizeof(float));
 	forces = (vector*)malloc(N * sizeof(vector));
-
-	// allocate for cuda
-	if (M == CUDA) {
-		cudaMemcpyToSymbol(d_N, &N, sizeof(int));
-		cudaMemcpyToSymbol(d_D, &D, sizeof(int));
-
-		/*cudaMalloc((void**)&d_forces, N * sizeof(vector));
-		cudaMalloc((void**)&d_bodies, N * sizeof(nbody));
-		checkCUDAErrors("cuda malloc");*/
-
-		float* hd_forces = nullptr;
-		cudaMalloc((void**)&hd_forces, D * D * sizeof(float));
-		checkCUDAErrors("cuda malloc d_forces");
-		cudaMemcpyToSymbol(d_forces, &hd_forces, sizeof(hd_forces));
-
-		float* hd_bodies = nullptr;
-		cudaMalloc((void**)&hd_bodies, D * D * sizeof(float));
-		checkCUDAErrors("cuda malloc d_bodies");
-		cudaMemcpyToSymbol(d_bodies, &hd_bodies, sizeof(hd_bodies));
-
-		float* hd_densities = nullptr;
-		cudaMalloc((void**)&hd_densities, D * D * sizeof(float));
-		checkCUDAErrors("cuda malloc d_densities");
-		cudaMemcpyToSymbol(d_densities, &hd_densities, sizeof(hd_densities));
-	}
 
 	// Depending on program arguments, either read initial data from file or generate random data.
 	if (input_file == NULL) {
@@ -99,9 +73,32 @@ int main(int argc, char* argv[]) {
 		load_data_from_file();
 	}
 	//print_bodies();
+
+	// allocate for cuda
 	if (M == CUDA) {
+		cudaMemcpyToSymbol(d_N, &N, sizeof(int));
+		cudaMemcpyToSymbol(d_D, &D, sizeof(int));
+
+		/*cudaMalloc((void**)&d_forces, N * sizeof(vector));
+		cudaMalloc((void**)&d_bodies, N * sizeof(nbody));
 		cudaMemcpy(d_bodies, bodies, N * sizeof(nbody), cudaMemcpyHostToDevice);
-		checkCUDAErrors("cuda memecpy");
+		checkCUDAErrors("cuda malloc");*/
+
+		float* hd_forces = nullptr;
+		cudaMalloc((void**)&hd_forces, N * sizeof(vector));
+		checkCUDAErrors("cuda malloc d_forces");
+		cudaMemcpyToSymbol(d_forces, &hd_forces, sizeof(hd_forces));
+
+		float* hd_bodies = nullptr;
+		cudaMalloc((void**)&hd_bodies, N * sizeof(nbody));
+		cudaMemcpyToSymbol(d_bodies, &hd_bodies, sizeof(hd_bodies));
+		cudaMemcpy(hd_bodies, bodies, N * sizeof(nbody), cudaMemcpyHostToDevice);
+		checkCUDAErrors("cuda malloc d_bodies");
+
+		float* hd_densities = nullptr;
+		cudaMalloc((void**)&hd_densities, D * D * sizeof(float));
+		checkCUDAErrors("cuda malloc d_densities");
+		cudaMemcpyToSymbol(d_densities, &hd_densities, sizeof(hd_densities));
 	}
 
 	// Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
