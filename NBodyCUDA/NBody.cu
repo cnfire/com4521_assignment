@@ -17,17 +17,25 @@
 
 int N = 0;	// the number of bodies to simulate
 __constant__ int d_N = 0;
+
 int D = 0;	// the integer dimension of the activity grid
 __constant__ int d_D = 0;
+
 int I = 0;	// the number of simulation iterations
 MODE M;	// operation mode
 char* input_file = NULL;	// input file with an initial N bodies of data
+
 nbody* bodies = NULL;
 __device__ nbody* d_bodies;
+nbody* hd_bodies = nullptr;
+
 float* densities;	// store the density values of the D*D locations (acitvity map)
 __device__ float* d_densities;
+float* hd_densities = nullptr;
+
 vector* forces;	// force(F) of every body
 __device__ vector* d_forces;
+
 
 // declaration of all functions
 void print_help();
@@ -86,18 +94,18 @@ int main(int argc, char* argv[]) {
 		cudaMemcpy(d_bodies, bodies, N * sizeof(nbody), cudaMemcpyHostToDevice);
 		checkCUDAErrors("cuda malloc");*/
 
-		float* hd_forces = nullptr;
+		vector* hd_forces = nullptr;
 		cudaMalloc((void**)&hd_forces, N * sizeof(vector));
 		checkCUDAErrors("cuda malloc d_forces");
 		cudaMemcpyToSymbol(d_forces, &hd_forces, sizeof(hd_forces));
 
-		float* hd_bodies = nullptr;
+		/*nbody* hd_bodies = nullptr;*/
 		cudaMalloc((void**)&hd_bodies, N * sizeof(nbody));
 		cudaMemcpyToSymbol(d_bodies, &hd_bodies, sizeof(hd_bodies));
 		cudaMemcpy(hd_bodies, bodies, N * sizeof(nbody), cudaMemcpyHostToDevice);
 		checkCUDAErrors("cuda malloc d_bodies");
 
-		float* hd_densities = nullptr;
+		/*float* hd_densities = nullptr;*/
 		cudaMalloc((void**)&hd_densities, D * D * sizeof(float));
 		checkCUDAErrors("cuda malloc d_densities");
 		cudaMemcpyToSymbol(d_densities, &hd_densities, sizeof(hd_densities));
@@ -107,7 +115,7 @@ int main(int argc, char* argv[]) {
 	char* mode = M == CPU ? "CPU" : M == OPENMP ? "OPENMP" : "CUDA";
 	if (I == 0) {
 		printf("\n\nStart simulate by visualisation mode with %s computing...", mode);
-		if (!M == CUDA) {
+		if (M != CUDA){
 			initViewer(N, D, M, step);
 			setNBodyPositions(bodies);
 			//setActivityMapData(densities);
@@ -116,8 +124,8 @@ int main(int argc, char* argv[]) {
 		}
 		else {
 			initViewer(N, D, M, step);
-			setNBodyPositions(d_bodies);
-			setHistogramData(d_densities);
+			setNBodyPositions(hd_bodies);
+			setHistogramData(hd_densities);
 			startVisualisationLoop();
 		}
 	}
@@ -178,6 +186,12 @@ void step(void) {
 		calc_densities();
 		// Update location and velocity of n bodies
 		update_location_velocity();
+		//print_bodies();
+		/*printf("\n");
+		for (int i = 0; i < D * D; i++) {
+			printf("%f,",densities[i]);
+		}
+		printf("\n");*/
 	}
 	else if (M == OPENMP) {
 		calc_forces_by_parallel();
@@ -210,9 +224,8 @@ void step(void) {
 	else {
 		fprintf(stderr, "\n%d mode is not supported", M);
 	}
-
-	//exit(0);
 }
+
 
 /**
  * Compute fore of every body by serial mode
@@ -387,7 +400,7 @@ __global__ void reset_d_densities() {
 	for (int i = 0; i < d_D * d_D; i++) {
 		d_densities[i] = 0;
 	}
-	printf("\nreset_d_densities:%d", i);
+	//printf("\nreset_d_densities:%d", i);
 }
 
 __global__ void calc_densities_by_cuda() {
@@ -405,7 +418,6 @@ __global__ void calc_densities_by_cuda() {
 		//printf("\nd:%f", d_densities[index]);
 	}
 }
-
 
 
 /**
