@@ -115,7 +115,7 @@ int main(int argc, char* argv[]) {
 	char* mode = M == CPU ? "CPU" : M == OPENMP ? "OPENMP" : "CUDA";
 	if (I == 0) {
 		printf("\n\nStart simulate by visualisation mode with %s computing...", mode);
-		if (M != CUDA){
+		if (M != CUDA) {
 			initViewer(N, D, M, step);
 			setNBodyPositions(bodies);
 			//setActivityMapData(densities);
@@ -140,7 +140,7 @@ int main(int argc, char* argv[]) {
 			printf("\n\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
 			//print_bodies();
 		}
-		
+
 		//print_densities();
 		// stop timer
 		double total = omp_get_wtime() - begin_outer;
@@ -216,7 +216,8 @@ void step(void) {
 		checkCUDAErrors("calc_densities_by_cuda");
 
 		update_location_velocity_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-
+		cudaDeviceSynchronize();
+		checkCUDAErrors("update_location_velocity_by_cuda");
 		/*for (int i = 0; i < N; i++) {
 			printf("\n(%f,%f)", forces[i].x, forces[i].y);
 		}*/
@@ -390,17 +391,14 @@ void calc_densities_with_atomic() {
 	}
 }
 
-
 __global__ void reset_d_densities() {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i > 0) {
-		printf("error: No more than one thread ");
+	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
+		printf("error: No more than one thread. ");
 		return;
 	}
 	for (int i = 0; i < d_D * d_D; i++) {
 		d_densities[i] = 0;
 	}
-	//printf("\nreset_d_densities:%d", i);
 }
 
 __global__ void calc_densities_by_cuda() {
@@ -414,7 +412,8 @@ __global__ void calc_densities_by_cuda() {
 		int y = (int)ceil(body->y / scale) - 1;
 		// the index of one dimensional array
 		int index = y * d_D + x;
-		d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
+		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
+		d_densities[index] = atomicAdd_system(d_densities[index], 1.0 * d_D / d_N);
 		//printf("\nd:%f", d_densities[index]);
 	}
 }
