@@ -265,7 +265,7 @@ void checkCUDAErrors(const char* msg) {
 	}
 }
 
-
+// implemention of each body
 __global__ void calc_forces_by_cuda() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
@@ -373,24 +373,6 @@ __global__ void reset_d_densities() {
 	}
 	for (int i = 0; i < d_D * d_D; i++) {
 		d_densities[i] = 0;
-	}
-}
-
-__global__ void calc_densities_by_cuda2() {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i < d_N) {
-		nbody* body = &d_bodies[i];
-		double scale = 1.0 / d_D;
-		// x-axis coordinate of D*D locations
-		int x = (int)ceil(body->x / scale) - 1;
-		// y-axis coordinate of D*D locations
-		int y = (int)ceil(body->y / scale) - 1;
-		// the index of one dimensional array
-		int index = y * d_D + x;
-		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
-		//atomicAdd(d_densities[index], 1.0 * d_D / d_N);
-		//atomicAdd(null, 1.0 * d_D / d_N);
-		//printf("\nd:%f", d_densities[index]);
 	}
 }
 
