@@ -72,7 +72,14 @@ int main(int argc, char* argv[]) {
 	parse_parameter(argc, argv);
 	// Allocate any heap memory
 	bodies = (nbody*)malloc(N * sizeof(nbody));
-	bodies_soa = (nbody_soa*)malloc(N * sizeof(nbody_soa));
+
+	bodies_soa = (nbody_soa*)malloc(sizeof(nbody_soa*));
+	bodies_soa->x = (float*)malloc(N * sizeof(float));
+	bodies_soa->y = (float*)malloc(N * sizeof(float));
+	bodies_soa->vx = (float*)malloc(N * sizeof(float));
+	bodies_soa->vy = (float*)malloc(N * sizeof(float));
+	bodies_soa->m = (float*)malloc(N * sizeof(float));
+
 	// initialize all values are zero
 	densities = (float*)calloc(D * D, sizeof(float));
 	forces = (vector*)malloc(N * sizeof(vector));
@@ -86,19 +93,20 @@ int main(int argc, char* argv[]) {
 		printf("\n\nInit n bodies by loading data from file...");
 		load_data_from_file();
 	}
-
-	for (int i = 0; i < N; i++) {
-		printf("\nbb:%f", bodies_soa->x[i]);
-		/*bodies_soa->x[i] = bodies[i].x;
-		bodies_soa->y[i] = bodies[i].y;
-		bodies_soa->vx[i] = bodies[i].vx;
-		bodies_soa->vy[i] = bodies[i].vy;
-		bodies_soa->m[i] = bodies[i].m;*/
-	}
 	//print_bodies();
 
+	for (int i = 0; i < N; i++) {
+		bodies_soa->x[i] = bodies[i].x;
+		bodies_soa->y[i] = bodies[i].y;
+		bodies_soa->vx[i] = bodies[i].vx;
+		//bodies_soa->vy[i] = bodies[i].vy;
+		bodies_soa->m[i] = bodies[i].m;
+	}
+	printf("\nbb:%f", bodies_soa->x[0]);
+	exit(0);
+
 	// allocate for cuda
-	if (M == CUDA) {
+	if (M == CUDA && 1 > 2) {
 		cudaMemcpyToSymbol(d_N, &N, sizeof(int));
 		cudaMemcpyToSymbol(d_D, &D, sizeof(int));
 
@@ -118,9 +126,16 @@ int main(int argc, char* argv[]) {
 		cudaMemcpy(hd_bodies, bodies, N * sizeof(nbody), cudaMemcpyHostToDevice);
 		checkCUDAErrors("cuda malloc d_bodies");
 
-		cudaMalloc((void**)&hd_bodies_soa, N * sizeof(nbody_soa));
+		cudaMalloc((void**)&hd_bodies_soa, sizeof(nbody_soa*));
 		cudaMemcpyToSymbol(d_bodies_soa, &hd_bodies_soa, sizeof(hd_bodies_soa));
-		cudaMemcpy(hd_bodies_soa, bodies_soa, N * sizeof(nbody_soa), cudaMemcpyHostToDevice);
+
+		cudaMalloc((void**)&hd_bodies_soa->x, N * sizeof(float));
+		cudaMalloc((void**)&hd_bodies_soa->y, N * sizeof(float));
+		cudaMalloc((void**)&hd_bodies_soa->vx, N * sizeof(float));
+		cudaMalloc((void**)&hd_bodies_soa->vy, N * sizeof(float));
+		cudaMalloc((void**)&hd_bodies_soa->m, N * sizeof(float));
+
+		cudaMemcpy(hd_bodies_soa->x, bodies_soa->x, N * sizeof(float), cudaMemcpyHostToDevice);
 		checkCUDAErrors("cuda malloc d_bodies_soa");
 
 		/*float* hd_densities = nullptr;*/
@@ -128,6 +143,7 @@ int main(int argc, char* argv[]) {
 		checkCUDAErrors("cuda malloc d_densities");
 		cudaMemcpyToSymbol(d_densities, &hd_densities, sizeof(hd_densities));
 	}
+
 
 	// Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
 	char* mode = M == CPU ? "CPU" : M == OPENMP ? "OPENMP" : "CUDA";
