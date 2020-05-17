@@ -26,10 +26,11 @@ MODE M;	// operation mode
 char* input_file = NULL;	// input file with an initial N bodies of data
 
 nbody* bodies = NULL;
+nbody_soa* bodies_soa = NULL;
 __device__ nbody* d_bodies;
 nbody* hd_bodies = nullptr;
 __device__ nbody_soa* d_bodies_soa;
-nbody* hd_bodies_soa = nullptr;
+nbody_soa* hd_bodies_soa = nullptr;
 
 float* densities;	// store the density values of the D*D locations (acitvity map)
 __device__ float* d_densities;
@@ -71,6 +72,7 @@ int main(int argc, char* argv[]) {
 	parse_parameter(argc, argv);
 	// Allocate any heap memory
 	bodies = (nbody*)malloc(N * sizeof(nbody));
+	bodies_soa = (nbody_soa*)malloc(N * sizeof(nbody_soa));
 	// initialize all values are zero
 	densities = (float*)calloc(D * D, sizeof(float));
 	forces = (vector*)malloc(N * sizeof(vector));
@@ -83,6 +85,15 @@ int main(int argc, char* argv[]) {
 	else {
 		printf("\n\nInit n bodies by loading data from file...");
 		load_data_from_file();
+	}
+
+	for (int i = 0; i < N; i++) {
+		printf("\nbb:%f", bodies_soa->x[i]);
+		/*bodies_soa->x[i] = bodies[i].x;
+		bodies_soa->y[i] = bodies[i].y;
+		bodies_soa->vx[i] = bodies[i].vx;
+		bodies_soa->vy[i] = bodies[i].vy;
+		bodies_soa->m[i] = bodies[i].m;*/
 	}
 	//print_bodies();
 
@@ -109,7 +120,7 @@ int main(int argc, char* argv[]) {
 
 		cudaMalloc((void**)&hd_bodies_soa, N * sizeof(nbody_soa));
 		cudaMemcpyToSymbol(d_bodies_soa, &hd_bodies_soa, sizeof(hd_bodies_soa));
-		cudaMemcpy(hd_bodies_soa, bodies, N * sizeof(nbody_soa), cudaMemcpyHostToDevice);
+		cudaMemcpy(hd_bodies_soa, bodies_soa, N * sizeof(nbody_soa), cudaMemcpyHostToDevice);
 		checkCUDAErrors("cuda malloc d_bodies_soa");
 
 		/*float* hd_densities = nullptr;*/
@@ -132,7 +143,7 @@ int main(int argc, char* argv[]) {
 		else {
 			initViewer(N, D, M, step);
 			//setNBodyPositions(hd_bodies);
-			setNBodyPositions(hd_bodies_soa);
+			setNBodyPositions2f(hd_bodies_soa->x, hd_bodies_soa->y);
 			setHistogramData(hd_densities);
 			startVisualisationLoop();
 		}
@@ -311,7 +322,11 @@ __global__ void calc_forces_by_cuda___() {
 
 __global__ void calc_forces_by_cuda() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i < d_N) {
+	if (i == 0) {
+		printf("\n(x:%f,y:%f)", d_bodies_soa->x[i], d_bodies_soa->y[i]);
+	}
+
+	if (i > d_N * 10000) {
 		// compute the force of every body
 		//nbody* body_i = &d_bodies[i];
 		vector f = { 0, 0 };
@@ -332,12 +347,6 @@ __global__ void calc_forces_by_cuda() {
 		d_forces[i].y = f.y;
 		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);//(x:-0.010679,y:-0.046293)
 
-		//// calc the acceleration of body
-		//vector a = { d_forces[i].x / body_i->m, d_forces[i].y / body_i->m };
-		//// new velocity
-		//vector v_new = { body_i->vx + dt * a.x, body_i->vy + dt * a.y };
-		//// new location
-		//vector l_new = { body_i->x + dt * v_new.x, body_i->y + dt * v_new.y };
 
 		// calc the acceleration of body
 		vector a = { d_forces[i].x / d_bodies_soa->m[i], d_forces[i].y / d_bodies_soa->m[i] };
