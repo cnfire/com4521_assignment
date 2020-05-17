@@ -132,7 +132,7 @@ int main(int argc, char* argv[]) {
 		float* vx; cudaMalloc((void**)&vx, size_b); cudaMemcpy(vx, bodies_soa->vx, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vx), &vx, sizeof(float*), cudaMemcpyHostToDevice);
 		float* vy; cudaMalloc((void**)&vy, size_b); cudaMemcpy(vy, bodies_soa->vy, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vy), &vy, sizeof(float*), cudaMemcpyHostToDevice);
 		float* m; cudaMalloc((void**)&m, size_b); cudaMemcpy(m, bodies_soa->m, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->m), &m, sizeof(float*), cudaMemcpyHostToDevice);
-		//cudaMemcpyToSymbol(d_bodies_soa, &hd_bodies_soa, sizeof(hd_bodies_soa));
+		cudaMemcpyToSymbol(d_bodies_soa, &hd_bodies_soa, sizeof(hd_bodies_soa));
 		checkCUDAErrors("cuda malloc d_bodies_soa");
 
 		/*float* hd_densities = nullptr;*/
