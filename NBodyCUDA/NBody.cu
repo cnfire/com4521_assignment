@@ -13,7 +13,7 @@
 
 #define USER_NAME "Xiaowei Zhu" 
 
-#define THREADS_PER_BLOCK 128
+#define THREADS_PER_BLOCK 128 //
 
 int N = 0;	// the number of bodies to simulate
 __constant__ int d_N = 0;
