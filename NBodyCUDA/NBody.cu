@@ -28,6 +28,8 @@ char* input_file = NULL;	// input file with an initial N bodies of data
 nbody* bodies = NULL;
 __device__ nbody* d_bodies;
 nbody* hd_bodies = nullptr;
+__device__ nbody_soa* d_bodies_soa;
+nbody* hd_bodies_soa = nullptr;
 
 float* densities;	// store the density values of the D*D locations (acitvity map)
 __device__ float* d_densities;
@@ -104,6 +106,11 @@ int main(int argc, char* argv[]) {
 		cudaMemcpyToSymbol(d_bodies, &hd_bodies, sizeof(hd_bodies));
 		cudaMemcpy(hd_bodies, bodies, N * sizeof(nbody), cudaMemcpyHostToDevice);
 		checkCUDAErrors("cuda malloc d_bodies");
+
+		cudaMalloc((void**)&hd_bodies_soa, N * sizeof(nbody_soa));
+		cudaMemcpyToSymbol(d_bodies_soa, &hd_bodies_soa, sizeof(hd_bodies_soa));
+		cudaMemcpy(hd_bodies_soa, bodies, N * sizeof(nbody_soa), cudaMemcpyHostToDevice);
+		checkCUDAErrors("cuda malloc d_bodies_soa");
 
 		/*float* hd_densities = nullptr;*/
 		cudaMalloc((void**)&hd_densities, D * D * sizeof(float));
@@ -217,7 +224,7 @@ void calc_forces_by_serial() {
 			nbody* body_k = &bodies[k];
 			vector s1 = { body_k->x - body_j->x, body_k->y - body_j->y };
 			vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
-			double s3 = pow(pow(s1.x, 2) + pow(s1.y, 2) + pow(SOFTENING, 2), 1.5);
+			double s3 = pow(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
@@ -244,7 +251,7 @@ void calc_forces_by_parallel() {
 			nbody* body_k = &bodies[k];
 			vector s1 = { body_k->x - body_j->x, body_k->y - body_j->y };
 			vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
-			double s3 = pow(pow(s1.x, 2) + pow(s1.y, 2) + pow(SOFTENING, 2), 1.5);
+			double s3 = pow(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
@@ -266,7 +273,7 @@ void checkCUDAErrors(const char* msg) {
 }
 
 // implemention of each body
-__global__ void calc_forces_by_cuda() {
+__global__ void calc_forces_by_cuda___() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		// compute the force of every body
@@ -301,7 +308,40 @@ __global__ void calc_forces_by_cuda() {
 	}
 }
 
+__global__ void calc_forces_by_cuda() {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < d_N) {
+		// compute the force of every body
+		//nbody* body_i = &d_bodies[i];
+		vector f = { 0, 0 };
+		for (int k = 0; k < d_N; k++) {
+			// skip the influence of body on itself
+			if (k == i) continue;
+			//nbody* body_k = &d_bodies[k];
+			vector s1 = { body_k->x - body_i->x, body_k->y - body_i->y };
+			vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
+			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
+			f.x = f.x + s2.x / s3;
+			f.y = f.y + s2.y / s3;
+		}
+		f.x = G * body_i->m * f.x;
+		f.y = G * body_i->m * f.y;
+		d_forces[i].x = f.x;
+		d_forces[i].y = f.y;
+		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);//(x:-0.010679,y:-0.046293)
 
+		// calc the acceleration of body
+		vector a = { d_forces[i].x / body_i->m, d_forces[i].y / body_i->m };
+		// new velocity
+		vector v_new = { body_i->vx + dt * a.x, body_i->vy + dt * a.y };
+		// new location
+		vector l_new = { body_i->x + dt * v_new.x, body_i->y + dt * v_new.y };
+		body_i->x = l_new.x;
+		body_i->y = l_new.y;
+		body_i->vx = v_new.x;
+		body_i->vy = v_new.y;
+	}
+}
 
 /**
  * Calculate activity map
