@@ -73,7 +73,7 @@ int main(int argc, char* argv[]) {
 	// Allocate any heap memory
 	bodies = (nbody*)malloc(N * sizeof(nbody));
 
-	bodies_soa = (nbody_soa*)malloc(sizeof(nbody_soa*));
+	bodies_soa = (nbody_soa*)malloc(sizeof(nbody_soa));
 	bodies_soa->x = (float*)malloc(N * sizeof(float));
 	bodies_soa->y = (float*)malloc(N * sizeof(float));
 	bodies_soa->vx = (float*)malloc(N * sizeof(float));
