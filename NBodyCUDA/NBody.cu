@@ -131,7 +131,8 @@ int main(int argc, char* argv[]) {
 		}
 		else {
 			initViewer(N, D, M, step);
-			setNBodyPositions(hd_bodies);
+			//setNBodyPositions(hd_bodies);
+			setNBodyPositions(hd_bodies_soa);
 			setHistogramData(hd_densities);
 			startVisualisationLoop();
 		}
@@ -318,28 +319,36 @@ __global__ void calc_forces_by_cuda() {
 			// skip the influence of body on itself
 			if (k == i) continue;
 			//nbody* body_k = &d_bodies[k];
-			vector s1 = { body_k->x - body_i->x, body_k->y - body_i->y };
-			vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
+
+			vector s1 = { d_bodies_soa->x[k] - d_bodies_soa->x[i], d_bodies_soa->y[k] - d_bodies_soa->y[i] };
+			vector s2 = { s1.x * d_bodies_soa->m[k], s1.y * d_bodies_soa->m[k] };
 			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
-		f.x = G * body_i->m * f.x;
-		f.y = G * body_i->m * f.y;
+		f.x = G * d_bodies_soa->m[i] * f.x;
+		f.y = G * d_bodies_soa->m[i] * f.y;
 		d_forces[i].x = f.x;
 		d_forces[i].y = f.y;
 		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);//(x:-0.010679,y:-0.046293)
 
+		//// calc the acceleration of body
+		//vector a = { d_forces[i].x / body_i->m, d_forces[i].y / body_i->m };
+		//// new velocity
+		//vector v_new = { body_i->vx + dt * a.x, body_i->vy + dt * a.y };
+		//// new location
+		//vector l_new = { body_i->x + dt * v_new.x, body_i->y + dt * v_new.y };
+
 		// calc the acceleration of body
-		vector a = { d_forces[i].x / body_i->m, d_forces[i].y / body_i->m };
+		vector a = { d_forces[i].x / d_bodies_soa->m[i], d_forces[i].y / d_bodies_soa->m[i] };
 		// new velocity
-		vector v_new = { body_i->vx + dt * a.x, body_i->vy + dt * a.y };
+		vector v_new = { d_bodies_soa->vx[i] + dt * a.x, d_bodies_soa->vy[i] + dt * a.y };
 		// new location
-		vector l_new = { body_i->x + dt * v_new.x, body_i->y + dt * v_new.y };
-		body_i->x = l_new.x;
-		body_i->y = l_new.y;
-		body_i->vx = v_new.x;
-		body_i->vy = v_new.y;
+		vector l_new = { d_bodies_soa->x[i] + dt * v_new.x, d_bodies_soa->y[i] + dt * v_new.y };
+		d_bodies_soa->x[i] = l_new.x;
+		d_bodies_soa->y[i] = l_new.y;
+		d_bodies_soa->vx[i] = v_new.x;
+		d_bodies_soa->vy[i] = v_new.y;
 	}
 }
 
@@ -427,7 +436,7 @@ __global__ void reset_d_densities() {
 	}
 }
 
-__global__ void calc_densities_by_cuda() {
+__global__ void calc_densities_by_cuda__() {
 	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
 		printf("error: No more than one thread. ");
 		return;
@@ -439,6 +448,23 @@ __global__ void calc_densities_by_cuda() {
 		int x = (int)ceil(body->x / scale) - 1;
 		// y-axis coordinate of D*D locations
 		int y = (int)ceil(body->y / scale) - 1;
+		// the index of one dimensional array
+		int index = y * d_D + x;
+		d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
+	}
+}
+
+__global__ void calc_densities_by_cuda() {
+	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
+		printf("error: No more than one thread. ");
+		return;
+	}
+	for (int i = 0; i < d_N; i++) {
+		double scale = 1.0 / d_D;
+		// x-axis coordinate of D*D locations
+		int x = (int)ceil(d_bodies_soa->x[i] / scale) - 1;
+		// y-axis coordinate of D*D locations
+		int y = (int)ceil(d_bodies_soa->y[i] / scale) - 1;
 		// the index of one dimensional array
 		int index = y * d_D + x;
 		d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
