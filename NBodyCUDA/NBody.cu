@@ -212,9 +212,7 @@ void step(void) {
 	else if (M == CUDA) {
 		float time;
 		cudaEvent_t start, stop;
-		cudaEventCreate(&start);
-		cudaEventCreate(&stop);
-		cudaEventRecord(start, 0);
+		cudaEventCreate(&start);cudaEventCreate(&stop);cudaEventRecord(start, 0);
 		//int using_texture = N > 10000000 ? 1 : 0;
 		int using_texture = 1;
 
@@ -242,15 +240,9 @@ void step(void) {
 		cudaDeviceSynchronize();
 		checkCUDAErrors("calc_densities_by_cuda");
 
-		cudaEventRecord(stop, 0);
-		cudaEventSynchronize(stop);
-		cudaEventElapsedTime(&time, start, stop);
-
-		//output result
+		cudaEventRecord(stop, 0);cudaEventSynchronize(stop);cudaEventElapsedTime(&time, start, stop);
 		printf("\nExecution time was %f ms\n", time);
-
-		cudaEventDestroy(start);
-		cudaEventDestroy(stop);
+		cudaEventDestroy(start);cudaEventDestroy(stop);
 	}
 }
 
