@@ -182,8 +182,7 @@ void cleanup() {
 	free(bodies);
 	free(densities);
 	free(forces);
-	cudaFree(x_soa);
-	cudaFree(y_soa);
+	cudaFree(x_soa); cudaFree(y_soa); cudaFree(vx_soa); cudaFree(vy_soa); cudaFree(m_soa);
 	cudaFree(hd_bodies_soa);
 	cudaFree(hd_densities);
 	checkCUDAErrors("CUDA cleanup");
@@ -207,7 +206,10 @@ void step(void) {
 	}
 	else if (M == CUDA) {
 		cudaBindTexture(0, tex_x, x_soa, N * sizeof(float));
-		//cudaBindTexture(0, tex_y, y_soa, N * sizeof(float));
+		cudaBindTexture(0, tex_y, y_soa, N * sizeof(float));
+		cudaBindTexture(0, tex_vx, vx_soa, N * sizeof(float));
+		cudaBindTexture(0, tex_vy, vy_soa, N * sizeof(float));
+		cudaBindTexture(0, tex_m, m_soa, N * sizeof(float));
 		update_body_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 		checkCUDAErrors("update_body_by_cuda");
 		cudaUnbindTexture(tex_x);
