@@ -19,17 +19,14 @@
 #define THREADS_PER_BLOCK 128
 
 int N = 0;	// the number of bodies to simulate
-__constant__ int d_N = 0;
-
+__constant__ int d_N = 0; // N of device
 int D = 0;	// the integer dimension of the activity grid
-__constant__ int d_D = 0;
-
+__constant__ int d_D = 0; // D of device
 int I = 0;	// the number of simulation iterations
 MODE M;	// operation mode
 char* input_file = NULL;	// input file with an initial N bodies of data
-
-nbody* bodies = NULL;
-nbody_soa* bodies_soa = NULL;
+nbody* bodies = NULL;	// AOS structure of n bodies
+nbody_soa* bodies_soa = NULL; // SOA structure of n bodies
 __device__ nbody_soa* d_bodies_soa = NULL;
 nbody_soa* hd_bodies_soa = NULL;
 float* x_soa, * y_soa, * vx_soa, * vy_soa, * m_soa;
@@ -38,12 +35,15 @@ float* densities = NULL;	// store the density values of the D*D locations (acitv
 __device__ float* d_densities = NULL;
 float* hd_densities = NULL;
 
-vector* accelerations = NULL;	// force(F) of every body
+vector* accelerations = NULL;	// acceleration of every body
 __device__ vector* d_accelerations = NULL;
 vector* hd_accelerations = NULL;
 
-int N_FLOAT_SIZE = 0;
+int N_FLOAT_SIZE = 0; // N * sizeof(float)
 
+int show_verbose = 0; // if show the cost time for each iteration.
+
+// cuda texure variables
 texture<float, 1, cudaReadModeElementType>tex_x;
 texture<float, 1, cudaReadModeElementType>tex_y;
 texture<float, 1, cudaReadModeElementType>tex_vx;
@@ -105,7 +105,7 @@ int main(int argc, char* argv[]) {
 	}
 	//print_bodies();
 
-	// Allocate for cuda
+	// Allocation for cuda
 	if (M == CUDA) {
 		// Set value for cuda constant variables
 		cudaMemcpyToSymbol(d_N, &N, sizeof(int));
@@ -116,6 +116,7 @@ int main(int argc, char* argv[]) {
 		checkCUDAErrors("cuda malloc d_accelerations");
 		cudaMemcpyToSymbol(d_accelerations, &hd_accelerations, sizeof(hd_accelerations));
 
+		// Set for densities
 		cudaMalloc((void**)&hd_densities, D * D * sizeof(float));
 		checkCUDAErrors("cuda malloc d_densities");
 		cudaMemcpyToSymbol(d_densities, &hd_densities, sizeof(hd_densities));
@@ -129,9 +130,13 @@ int main(int argc, char* argv[]) {
 
 	// Reclaiming memory
 	cleanup();
+
 	return 0;
 }
 
+/**
+ * Perform simulation for n bodies.
+ */
 void perform_simulation() {
 	// Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
 	char* mode = M == CPU ? "CPU" : M == OPENMP ? "OPENMP" : "CUDA";
@@ -155,12 +160,16 @@ void perform_simulation() {
 		// start timer
 		double begin_outer = omp_get_wtime();
 		for (int i = 0; i < I; i++) {
-			/*printf("\n\nIteration epoch:%d...", i, i);
-			step();*/
-			double begin = omp_get_wtime();
-			step();
-			double elapsed = omp_get_wtime() - begin;
-			printf("\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
+			if (!show_verbose) {
+				printf("\n\nIteration epoch:%d...", i, i);
+				step();
+			}
+			else {
+				double begin = omp_get_wtime();
+				step();
+				double elapsed = omp_get_wtime() - begin;
+				printf("\n\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
+			}
 		}
 		// stop timer
 		double total = omp_get_wtime() - begin_outer;
@@ -168,6 +177,9 @@ void perform_simulation() {
 	}
 }
 
+/**
+ * Allocation for bodies_soa in device mainly.
+ */
 void set_bodies_soa() {
 	bodies_soa = (nbody_soa*)malloc(sizeof(nbody_soa));
 	bodies_soa->m = (float*)malloc(N_FLOAT_SIZE);
@@ -187,15 +199,18 @@ void set_bodies_soa() {
 	cudaMalloc((void**)&vx_soa, N_FLOAT_SIZE); cudaMemcpy(vx_soa, bodies_soa->vx, N_FLOAT_SIZE, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vx), &vx_soa, sizeof(float*), cudaMemcpyHostToDevice);
 	cudaMalloc((void**)&vy_soa, N_FLOAT_SIZE); cudaMemcpy(vy_soa, bodies_soa->vy, N_FLOAT_SIZE, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vy), &vy_soa, sizeof(float*), cudaMemcpyHostToDevice);
 	cudaMalloc((void**)&m_soa, N_FLOAT_SIZE); cudaMemcpy(m_soa, bodies_soa->m, N_FLOAT_SIZE, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->m), &m_soa, sizeof(float*), cudaMemcpyHostToDevice);
-	checkCUDAErrors("cuda malloc d_bodies_soa");
+	checkCUDAErrors("cuda allocate bodies_soa");
 }
 
+/**
+ * Free memroies.
+ */
 void cleanup() {
 	printf("\nClean memory...\n");
 	free(accelerations);
 	free(bodies);
 	free(densities);
-	
+
 	cudaFree(x_soa); cudaFree(y_soa); cudaFree(vx_soa); cudaFree(vy_soa); cudaFree(m_soa);
 	cudaFree(hd_bodies_soa);
 	cudaFree(hd_densities);
@@ -208,9 +223,10 @@ void cleanup() {
  * Perform the main simulation of the NBody system (Simulation within a single iteration)
  */
 void step(void) {
-	// compute the force of every body with different way
 	if (M == CPU) {
+		// Compute the acceleration of every body with serial way
 		calc_accelerations_by_serial();
+		// Update locations and velocities
 		update_location_velocity();
 		// Calculate density for the D*D locations (activity map)
 		calc_densities();
@@ -221,9 +237,11 @@ void step(void) {
 		calc_densities();
 	}
 	else if (M == CUDA) {
-		float time;
-		cudaEvent_t start, stop; cudaEventCreate(&start); cudaEventCreate(&stop);
-		cudaEventRecord(start, 0);
+		float time; cudaEvent_t start, stop;
+		if (show_verbose) {
+			cudaEventCreate(&start); cudaEventCreate(&stop);
+			cudaEventRecord(start, 0);
+		}
 		cudaMemset(hd_densities, 0, size_t(D * D) * sizeof(float));
 		checkCUDAErrors("cudaMemset");
 		int BLOCKS_PER_GRID = N / THREADS_PER_BLOCK + 1;
@@ -235,9 +253,11 @@ void step(void) {
 			calc_accelerations_by_cuda_with_global << <BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
 			checkCUDAErrors("calc_accelerations_by_cuda");
 			update_bodies_by_cuda_with_global << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
+			checkCUDAErrors("update_bodies_by_cuda_with_global");
 			break;
 		case SHARED:
 			calc_accelerations_by_cuda_with_shared << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
+			checkCUDAErrors("calc_accelerations_by_cuda_with_shared");
 			update_bodies_by_cuda_with_shared << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
 			checkCUDAErrors("update_bodies_by_cuda_with_shared");
 			break;
@@ -245,34 +265,37 @@ void step(void) {
 			cudaBindTexture(0, tex_x, x_soa, N_FLOAT_SIZE); cudaBindTexture(0, tex_y, y_soa, N_FLOAT_SIZE);
 			cudaBindTexture(0, tex_vx, vx_soa, N_FLOAT_SIZE); cudaBindTexture(0, tex_vy, vy_soa, N_FLOAT_SIZE);
 			cudaBindTexture(0, tex_m, m_soa, N_FLOAT_SIZE);
-
+			checkCUDAErrors("cudaBindTexture");
 			calc_accelerations_by_cuda_with_texture << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
-			update_bodies_by_cuda_with_texture << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
-
 			checkCUDAErrors("calc_accelerations_by_cuda_with_texture");
+			update_bodies_by_cuda_with_texture << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
+			checkCUDAErrors("update_bodies_by_cuda_with_texture");
 			cudaUnbindTexture(tex_x); cudaUnbindTexture(tex_y);
 			cudaUnbindTexture(tex_vx); cudaUnbindTexture(tex_vy);
 			cudaUnbindTexture(tex_m);
 			break;
 		case READ_ONLY:
 			calc_accelerations_by_cuda_with_readonly << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > (hd_bodies_soa);
-			update_bodies_by_cuda_with_global << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > (hd_bodies_soa, hd_accelerations);
 			checkCUDAErrors("calc_accelerations_by_cuda_with_readonly");
+			update_bodies_by_cuda_with_global << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > (hd_bodies_soa, hd_accelerations);
+			checkCUDAErrors("update_bodies_by_cuda_with_global");
 			break;
 		default:
 			break;
 		}
 
-		cudaEventRecord(stop, 0); cudaEventSynchronize(stop); cudaEventElapsedTime(&time, start, stop); cudaEventDestroy(start); cudaEventDestroy(stop);
-		//printf("\nCUDA execution time was %f ms", time);
-
+		if (show_verbose) {
+			cudaEventRecord(stop, 0); cudaEventSynchronize(stop); cudaEventElapsedTime(&time, start, stop); 
+			cudaEventDestroy(start); cudaEventDestroy(stop);
+			printf("\nCUDA execution time was %f ms", time);
+		}
 		cudaDeviceSynchronize();
 	}
 }
 
 
 /**
- * Compute fore of every body by serial mode
+ * Compute accelerations of every body by serial mode
  */
 void calc_accelerations_by_serial() {
 	// compute the force of every body
@@ -299,7 +322,7 @@ void calc_accelerations_by_serial() {
 }
 
 /**
- * Compute fore of every body by paralle mode (using OPENMP)
+ * Compute accelerations of every body by paralle mode (using OPENMP)
  */
 void calc_accelerations_by_openmp() {
 	// compute the force of every body
@@ -327,7 +350,9 @@ void calc_accelerations_by_openmp() {
 	}
 }
 
-// Update location and velocity of n bodies (GPU and OPENMP mode)
+/**
+ * Update location and velocity of n bodies (Using in CPU and OPENMP mode)
+ */
 void update_location_velocity() {
 	for (int i = 0; i < N; i++) {
 		nbody* body = &bodies[i];
@@ -342,19 +367,12 @@ void update_location_velocity() {
 	}
 }
 
-
-void checkCUDAErrors(const char* msg) {
-	cudaError_t err = cudaGetLastError();
-	if (cudaSuccess != err) {
-		fprintf(stderr, "\nCUDA ERROR: %s: %s.\n", msg, cudaGetErrorString(err));
-		exit(EXIT_FAILURE);
-	}
-}
-
+/**
+ * Calculate accelerations by CUDA with global memory
+ */
 __global__ void calc_accelerations_by_cuda_with_global() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
-		//printf("\n(x:%f,y:%f,vx:%f,vy:%f,m:%f)", d_bodies_soa->x[i], d_bodies_soa->y[i], d_bodies_soa->vx[i], d_bodies_soa->vy[i], d_bodies_soa->m[i]);
 		// compute the force of every body
 		vector f = { 0, 0 };
 		for (int k = 0; k < d_N; k++) {
@@ -375,6 +393,9 @@ __global__ void calc_accelerations_by_cuda_with_global() {
 	}
 }
 
+/**
+ * Calculate accelerations by CUDA with global memory
+ */
 __global__ void update_bodies_by_cuda_with_global() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
@@ -399,11 +420,13 @@ __global__ void update_bodies_by_cuda_with_global() {
 	}
 }
 
+/**
+ * Calculate accelerations by CUDA with texture memory
+ */
 __global__ void calc_accelerations_by_cuda_with_texture() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		// compute the force of every body
-		//printf("\n:tex1Dfetch:%f,real:%f", tex1Dfetch(tex_x, i), d_bodies_soa->x[i]);
 		vector f = { 0, 0 };
 		for (int k = 0; k < d_N; k++) {
 			// skip the influence of body on itself
@@ -447,21 +470,18 @@ __global__ void update_bodies_by_cuda_with_texture() {
 	}
 }
 
-
-// when N < BLOCK_SIZE
+/**
+ * Calculate accelerations by CUDA with shared memory(when N <= BLOCK_SIZE)
+ */
 __global__ void calc_accelerations_by_cuda_with_shared() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	__shared__ float x_arr[THREADS_PER_BLOCK];
 	__shared__ float y_arr[THREADS_PER_BLOCK];
-	__shared__ float vx_arr[THREADS_PER_BLOCK];
-	__shared__ float vy_arr[THREADS_PER_BLOCK];
 	__shared__ float m_arr[THREADS_PER_BLOCK];
 	int idx = threadIdx.x;
 	if (i < d_N) {
 		x_arr[idx] = d_bodies_soa->x[i];
 		y_arr[idx] = d_bodies_soa->y[i];
-		vx_arr[idx] = d_bodies_soa->vx[i];
-		vy_arr[idx] = d_bodies_soa->vy[i];
 		m_arr[idx] = d_bodies_soa->m[i];
 		__syncthreads();
 
@@ -518,6 +538,9 @@ __global__ void update_bodies_by_cuda_with_shared() {
 	}
 }
 
+/**
+ * Calculate accelerations by CUDA with readonly memory
+ */
 __global__ void calc_accelerations_by_cuda_with_readonly(nbody_soa const* __restrict__ nbodies) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
@@ -832,4 +855,15 @@ char** split(const char* string, char dim, int size) {
 	}
 	free(new_string);
 	return res;
+}
+
+/**
+ * Check cuda errors
+ */
+void checkCUDAErrors(const char* msg) {
+	cudaError_t err = cudaGetLastError();
+	if (cudaSuccess != err) {
+		fprintf(stderr, "\nCUDA ERROR: %s: %s.\n", msg, cudaGetErrorString(err));
+		exit(EXIT_FAILURE);
+	}
 }
