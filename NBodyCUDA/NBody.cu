@@ -70,6 +70,7 @@ void cleanup();
 void perform_simulation();
 
 __global__ void update_body_by_cuda();
+__global__ void update_body_by_cuda_with_texture();
 __global__ void calc_densities_by_cuda();
 __global__ void reset_d_densities();
 
@@ -207,6 +208,7 @@ void step(void) {
 	else if (M == CUDA) {
 
 
+		//int using_texture = N > 10000000 ? 1 : 0;
 		int using_texture = 1;
 
 
@@ -215,12 +217,13 @@ void step(void) {
 			checkCUDAErrors("update_body_by_cuda");
 		}
 		else {
+			printf("\nUsing texture to optmize\n");
 			int size_f = N * sizeof(float);
 			cudaBindTexture(0, tex_x, x_soa, size_f); cudaBindTexture(0, tex_y, y_soa, size_f);
 			cudaBindTexture(0, tex_vx, vx_soa, size_f); cudaBindTexture(0, tex_vy, vy_soa, size_f);
 			cudaBindTexture(0, tex_m, m_soa, size_f);
-			update_body_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-			checkCUDAErrors("update_body_by_cuda");
+			update_body_by_cuda_with_texture << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+			checkCUDAErrors("update_body_by_cuda_with_texture");
 			cudaUnbindTexture(tex_x); cudaUnbindTexture(tex_y);
 			cudaUnbindTexture(tex_vx); cudaUnbindTexture(tex_vy);
 			cudaUnbindTexture(tex_m);
@@ -359,7 +362,7 @@ __global__ void update_body_by_cuda_with_texture() {
 	if (i < d_N) {
 		//printf("\n(x:%f,y:%f,vx:%f,vy:%f,m:%f)", d_bodies_soa->x[i], d_bodies_soa->y[i], d_bodies_soa->vx[i], d_bodies_soa->vy[i], d_bodies_soa->m[i]);
 		// compute the force of every body
-		printf("\n:tex1Dfetch:%f,real:%f", tex1Dfetch(tex_x, i), d_bodies_soa->x[i]);
+		//printf("\n:tex1Dfetch:%f,real:%f", tex1Dfetch(tex_x, i), d_bodies_soa->x[i]);
 		vector f = { 0, 0 };
 		for (int k = 0; k < d_N; k++) {
 			// skip the influence of body on itself
