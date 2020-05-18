@@ -13,7 +13,7 @@
 
 #define USER_NAME "Xiaowei Zhu"
 
-#define THREADS_PER_BLOCK 128 //
+#define THREADS_PER_BLOCK 128 
 
 int N = 0;	// the number of bodies to simulate
 __constant__ int d_N = 0;
@@ -27,17 +27,16 @@ char* input_file = NULL;	// input file with an initial N bodies of data
 
 nbody* bodies = NULL;
 nbody_soa* bodies_soa = NULL;
-__device__ nbody* d_bodies;
-nbody* hd_bodies = NULL;
-__device__ nbody_soa* d_bodies_soa;
+__device__ nbody_soa* d_bodies_soa = NULL;
 nbody_soa* hd_bodies_soa = NULL;
+float* x_soa, * y_soa;
 
-float* densities;	// store the density values of the D*D locations (acitvity map)
-__device__ float* d_densities;
+float* densities = NULL;	// store the density values of the D*D locations (acitvity map)
+__device__ float* d_densities = NULL;
 float* hd_densities = NULL;
 
-vector* forces;	// force(F) of every body
-__device__ vector* d_forces;
+vector* forces = NULL;	// force(F) of every body
+__device__ vector* d_forces = NULL;
 
 
 // declaration of all functions
@@ -49,12 +48,11 @@ void step(void);
 void update_body_by_serial();
 void update_body_by_parallel();
 
-//__global__ void update_body_by_cuda(nbody* d_bodies, vector* d_forces);
 __global__ void update_body_by_cuda();
 __global__ void calc_densities_by_cuda();
 __global__ void reset_d_densities();
 
-float* x_soa, * y_soa;
+
 
 
 void calc_densities();
@@ -109,28 +107,15 @@ int main(int argc, char* argv[]) {
 		cudaMemcpyToSymbol(d_N, &N, sizeof(int));
 		cudaMemcpyToSymbol(d_D, &D, sizeof(int));
 
-		/*cudaMalloc((void**)&d_forces, N * sizeof(vector));
-		cudaMalloc((void**)&d_bodies, N * sizeof(nbody));
-		cudaMemcpy(d_bodies, bodies, N * sizeof(nbody), cudaMemcpyHostToDevice);
-		checkCUDAErrors("cuda malloc");*/
-
 		vector* hd_forces = nullptr;
 		cudaMalloc((void**)&hd_forces, N * sizeof(vector));
 		checkCUDAErrors("cuda malloc d_forces");
 		cudaMemcpyToSymbol(d_forces, &hd_forces, sizeof(hd_forces));
 
-		/*nbody* hd_bodies = nullptr;*/
-		cudaMalloc((void**)&hd_bodies, N * sizeof(nbody));
-		cudaMemcpyToSymbol(d_bodies, &hd_bodies, sizeof(hd_bodies));
-		cudaMemcpy(hd_bodies, bodies, N * sizeof(nbody), cudaMemcpyHostToDevice);
-		checkCUDAErrors("cuda malloc d_bodies");
-
 		cudaMalloc((void**)&hd_bodies_soa, sizeof(nbody_soa));
 		cudaMemcpyToSymbol(d_bodies_soa, &hd_bodies_soa, sizeof(hd_bodies_soa));
 		cudaMemcpy(hd_bodies_soa, bodies_soa, sizeof(bodies_soa), cudaMemcpyHostToDevice);
 		int size_b = N * sizeof(float);
-		/*float* x; cudaMalloc((void**)&x, size_b); cudaMemcpy(x, bodies_soa->x, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->x), &x, sizeof(float*), cudaMemcpyHostToDevice);
-		float* y; cudaMalloc((void**)&y, size_b); cudaMemcpy(y, bodies_soa->y, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->y), &y, sizeof(float*), cudaMemcpyHostToDevice);*/
 		cudaMalloc((void**)&x_soa, size_b); cudaMemcpy(x_soa, bodies_soa->x, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->x), &x_soa, sizeof(float*), cudaMemcpyHostToDevice);
 		cudaMalloc((void**)&y_soa, size_b); cudaMemcpy(y_soa, bodies_soa->y, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->y), &y_soa, sizeof(float*), cudaMemcpyHostToDevice);
 		float* vx; cudaMalloc((void**)&vx, size_b); cudaMemcpy(vx, bodies_soa->vx, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vx), &vx, sizeof(float*), cudaMemcpyHostToDevice);
@@ -138,7 +123,6 @@ int main(int argc, char* argv[]) {
 		float* m; cudaMalloc((void**)&m, size_b); cudaMemcpy(m, bodies_soa->m, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->m), &m, sizeof(float*), cudaMemcpyHostToDevice);
 		checkCUDAErrors("cuda malloc d_bodies_soa");
 
-		/*float* hd_densities = nullptr;*/
 		cudaMalloc((void**)&hd_densities, D * D * sizeof(float));
 		checkCUDAErrors("cuda malloc d_densities");
 		cudaMemcpyToSymbol(d_densities, &hd_densities, sizeof(hd_densities));
@@ -151,14 +135,11 @@ int main(int argc, char* argv[]) {
 		if (M != CUDA) {
 			initViewer(N, D, M, step);
 			setNBodyPositions(bodies);
-			//setActivityMapData(densities);
 			setHistogramData(densities);
 			startVisualisationLoop();
 		}
 		else {
 			initViewer(N, D, M, step);
-			//setNBodyPositions(hd_bodies);
-			//setNBodyPositions2f(hd_bodies_soa->x, hd_bodies_soa->x);
 			setNBodyPositions2f(x_soa, y_soa);
 			setHistogramData(hd_densities);
 			startVisualisationLoop();
@@ -210,8 +191,6 @@ void step(void) {
 		update_body_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 		cudaDeviceSynchronize();
 		checkCUDAErrors("update_body_by_cuda");
-		//cudaMemcpyFromSymbol(bodies, d_bodies, N * sizeof(nbody));
-		//print_bodies();
 
 		reset_d_densities << <1, 1 >> > ();
 		//cudaDeviceSynchronize();
@@ -314,54 +293,15 @@ void checkCUDAErrors(const char* msg) {
 	}
 }
 
-// implemention of each body
-__global__ void update_body_by_cuda___() {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	if (i < d_N) {
-		// compute the force of every body
-		nbody* body_i = &d_bodies[i];
-		vector f = { 0, 0 };
-		for (int k = 0; k < d_N; k++) {
-			// skip the influence of body on itself
-			if (k == i) continue;
-			nbody* body_k = &d_bodies[k];
-			vector s1 = { body_k->x - body_i->x, body_k->y - body_i->y };
-			vector s2 = { s1.x * body_k->m, s1.y * body_k->m };
-			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
-			f.x = f.x + s2.x / s3;
-			f.y = f.y + s2.y / s3;
-		}
-		f.x = G * body_i->m * f.x;
-		f.y = G * body_i->m * f.y;
-		d_forces[i].x = f.x;
-		d_forces[i].y = f.y;
-		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);//(x:-0.010679,y:-0.046293)
-
-		// calc the acceleration of body
-		vector a = { d_forces[i].x / body_i->m, d_forces[i].y / body_i->m };
-		// new velocity
-		vector v_new = { body_i->vx + dt * a.x, body_i->vy + dt * a.y };
-		// new location
-		vector l_new = { body_i->x + dt * v_new.x, body_i->y + dt * v_new.y };
-		body_i->x = l_new.x;
-		body_i->y = l_new.y;
-		body_i->vx = v_new.x;
-		body_i->vy = v_new.y;
-	}
-}
-
 __global__ void update_body_by_cuda() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		//printf("\n(x:%f,y:%f,vx:%f,vy:%f,m:%f)", d_bodies_soa->x[i], d_bodies_soa->y[i], d_bodies_soa->vx[i], d_bodies_soa->vy[i], d_bodies_soa->m[i]);
 		// compute the force of every body
-		//nbody* body_i = &d_bodies[i];
 		vector f = { 0, 0 };
 		for (int k = 0; k < d_N; k++) {
 			// skip the influence of body on itself
 			if (k == i) continue;
-			//nbody* body_k = &d_bodies[k];
-
 			vector s1 = { d_bodies_soa->x[k] - d_bodies_soa->x[i], d_bodies_soa->y[k] - d_bodies_soa->y[i] };
 			vector s2 = { s1.x * d_bodies_soa->m[k], s1.y * d_bodies_soa->m[k] };
 			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
@@ -372,8 +312,6 @@ __global__ void update_body_by_cuda() {
 		f.y = G * d_bodies_soa->m[i] * f.y;
 		d_forces[i].x = f.x;
 		d_forces[i].y = f.y;
-		//printf("\n(x:%f,y:%f)", d_forces[i].x, d_forces[i].y);//(x:-0.010679,y:-0.046293)
-
 
 		// calc the acceleration of body
 		vector a = { d_forces[i].x / d_bodies_soa->m[i], d_forces[i].y / d_bodies_soa->m[i] };
@@ -469,24 +407,6 @@ __global__ void reset_d_densities() {
 	}
 	for (int i = 0; i < d_D * d_D; i++) {
 		d_densities[i] = 0;
-	}
-}
-
-__global__ void calc_densities_by_cuda__() {
-	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
-		printf("error: No more than one thread. ");
-		return;
-	}
-	for (int i = 0; i < d_N; i++) {
-		nbody* body = &d_bodies[i];
-		double scale = 1.0 / d_D;
-		// x-axis coordinate of D*D locations
-		int x = (int)ceil(body->x / scale) - 1;
-		// y-axis coordinate of D*D locations
-		int y = (int)ceil(body->y / scale) - 1;
-		// the index of one dimensional array
-		int index = y * d_D + x;
-		d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
 	}
 }
 
