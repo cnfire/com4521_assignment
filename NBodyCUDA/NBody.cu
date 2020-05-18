@@ -46,15 +46,8 @@ void init_data_by_random();
 void load_data_from_file();
 void step(void);
 void update_body_by_serial();
-void update_body_by_parallel();
-
-__global__ void update_body_by_cuda();
-__global__ void calc_densities_by_cuda();
-__global__ void reset_d_densities();
-
-
-
-
+void update_body_by_openmp();
+void set_bodies_soa();
 void calc_densities();
 void calc_densities_by_serial();
 void calc_densities_with_critical();
@@ -63,8 +56,12 @@ void print_bodies();
 void print_densities();
 char* get_string_in_range(char string[], int start, int end);
 char** split(const char* string, char dim, int size);
-
 void checkCUDAErrors(const char* msg);
+void cleanup();
+
+__global__ void update_body_by_cuda();
+__global__ void calc_densities_by_cuda();
+__global__ void reset_d_densities();
 
 int main(int argc, char* argv[]) {
 	// Processes the command line arguments
@@ -72,18 +69,11 @@ int main(int argc, char* argv[]) {
 	// Allocate any heap memory
 	bodies = (nbody*)malloc(N * sizeof(nbody));
 
-	bodies_soa = (nbody_soa*)malloc(sizeof(nbody_soa));
-	bodies_soa->x = (float*)malloc(N * sizeof(float));
-	bodies_soa->y = (float*)malloc(N * sizeof(float));
-	bodies_soa->vx = (float*)malloc(N * sizeof(float));
-	bodies_soa->vy = (float*)malloc(N * sizeof(float));
-	bodies_soa->m = (float*)malloc(N * sizeof(float));
-
-	// initialize all values are zero
+	// Initialize all values are zero
 	densities = (float*)calloc(D * D, sizeof(float));
 	forces = (vector*)malloc(N * sizeof(vector));
 
-	// Depending on program arguments, either read initial data from file or generate random data.
+	// Init data for n bodies, read initial data from file or generate random data.
 	if (input_file == NULL) {
 		printf("\n\nInit n bodies by generating random data...");
 		init_data_by_random();
@@ -94,38 +84,24 @@ int main(int argc, char* argv[]) {
 	}
 	//print_bodies();
 
-	for (int i = 0; i < N; i++) {
-		bodies_soa->x[i] = bodies[i].x;
-		bodies_soa->y[i] = bodies[i].y;
-		bodies_soa->vx[i] = bodies[i].vx;
-		bodies_soa->vy[i] = bodies[i].vy;
-		bodies_soa->m[i] = bodies[i].m;
-	}
-
-	// allocate for cuda
+	// Allocate for cuda
 	if (M == CUDA) {
+		// Set value for cuda constant variables
 		cudaMemcpyToSymbol(d_N, &N, sizeof(int));
 		cudaMemcpyToSymbol(d_D, &D, sizeof(int));
 
-		vector* hd_forces = nullptr;
+		// Set for forces
+		vector* hd_forces = NULL;
 		cudaMalloc((void**)&hd_forces, N * sizeof(vector));
 		checkCUDAErrors("cuda malloc d_forces");
 		cudaMemcpyToSymbol(d_forces, &hd_forces, sizeof(hd_forces));
 
-		cudaMalloc((void**)&hd_bodies_soa, sizeof(nbody_soa));
-		cudaMemcpyToSymbol(d_bodies_soa, &hd_bodies_soa, sizeof(hd_bodies_soa));
-		cudaMemcpy(hd_bodies_soa, bodies_soa, sizeof(bodies_soa), cudaMemcpyHostToDevice);
-		int size_b = N * sizeof(float);
-		cudaMalloc((void**)&x_soa, size_b); cudaMemcpy(x_soa, bodies_soa->x, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->x), &x_soa, sizeof(float*), cudaMemcpyHostToDevice);
-		cudaMalloc((void**)&y_soa, size_b); cudaMemcpy(y_soa, bodies_soa->y, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->y), &y_soa, sizeof(float*), cudaMemcpyHostToDevice);
-		float* vx; cudaMalloc((void**)&vx, size_b); cudaMemcpy(vx, bodies_soa->vx, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vx), &vx, sizeof(float*), cudaMemcpyHostToDevice);
-		float* vy; cudaMalloc((void**)&vy, size_b); cudaMemcpy(vy, bodies_soa->vy, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vy), &vy, sizeof(float*), cudaMemcpyHostToDevice);
-		float* m; cudaMalloc((void**)&m, size_b); cudaMemcpy(m, bodies_soa->m, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->m), &m, sizeof(float*), cudaMemcpyHostToDevice);
-		checkCUDAErrors("cuda malloc d_bodies_soa");
-
 		cudaMalloc((void**)&hd_densities, D * D * sizeof(float));
 		checkCUDAErrors("cuda malloc d_densities");
 		cudaMemcpyToSymbol(d_densities, &hd_densities, sizeof(hd_densities));
+
+		// Set for bodies_soa
+		set_bodies_soa();
 	}
 
 	// Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
@@ -165,6 +141,35 @@ int main(int argc, char* argv[]) {
 	return 0;
 }
 
+void set_bodies_soa() {
+	bodies_soa = (nbody_soa*)malloc(sizeof(nbody_soa));
+	bodies_soa->m = (float*)malloc(N * sizeof(float));
+	bodies_soa->x = (float*)malloc(N * sizeof(float)); bodies_soa->y = (float*)malloc(N * sizeof(float));
+	bodies_soa->vx = (float*)malloc(N * sizeof(float)); bodies_soa->vy = (float*)malloc(N * sizeof(float));
+	for (int i = 0; i < N; i++) {
+		bodies_soa->m[i] = bodies[i].m;
+		bodies_soa->x[i] = bodies[i].x; bodies_soa->y[i] = bodies[i].y;
+		bodies_soa->vx[i] = bodies[i].vx; bodies_soa->vy[i] = bodies[i].vy;
+	}
+
+	cudaMalloc((void**)&hd_bodies_soa, sizeof(nbody_soa));
+	cudaMemcpyToSymbol(d_bodies_soa, &hd_bodies_soa, sizeof(hd_bodies_soa));
+	cudaMemcpy(hd_bodies_soa, bodies_soa, sizeof(bodies_soa), cudaMemcpyHostToDevice);
+	int size_b = N * sizeof(float);
+	cudaMalloc((void**)&x_soa, size_b); cudaMemcpy(x_soa, bodies_soa->x, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->x), &x_soa, sizeof(float*), cudaMemcpyHostToDevice);
+	cudaMalloc((void**)&y_soa, size_b); cudaMemcpy(y_soa, bodies_soa->y, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->y), &y_soa, sizeof(float*), cudaMemcpyHostToDevice);
+	float* vx; cudaMalloc((void**)&vx, size_b); cudaMemcpy(vx, bodies_soa->vx, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vx), &vx, sizeof(float*), cudaMemcpyHostToDevice);
+	float* vy; cudaMalloc((void**)&vy, size_b); cudaMemcpy(vy, bodies_soa->vy, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vy), &vy, sizeof(float*), cudaMemcpyHostToDevice);
+	float* m; cudaMalloc((void**)&m, size_b); cudaMemcpy(m, bodies_soa->m, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->m), &m, sizeof(float*), cudaMemcpyHostToDevice);
+	checkCUDAErrors("cuda malloc d_bodies_soa");
+}
+
+void cleanup() {
+	//free(a); free(b); free(c);
+	//cudaFree(d_a); cudaFree(d_b); cudaFree(d_c);
+	//checkCUDAError("CUDA cleanup");
+}
+
 /**
  * Perform the main simulation of the NBody system (Simulation within a single iteration)
  */
@@ -174,30 +179,20 @@ void step(void) {
 		update_body_by_serial();
 		// Calculate density for the D*D locations (activity map)
 		calc_densities();
-		//print_bodies();
-		/*printf("\n");
-		for (int i = 0; i < D * D; i++) {
-			printf("%f,",densities[i]);
-		}
-		printf("\n");*/
 	}
 	else if (M == OPENMP) {
-		update_body_by_parallel();
+		update_body_by_openmp();
 		// Calculate density for the D*D locations (activity map)
 		calc_densities();
 	}
 	else if (M == CUDA) {
-		//test_cuda(); exit(0);
 		update_body_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-		cudaDeviceSynchronize();
 		checkCUDAErrors("update_body_by_cuda");
 
 		reset_d_densities << <1, 1 >> > ();
-		//cudaDeviceSynchronize();
 		checkCUDAErrors("reset_d_densities");
-		//calc_densities_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 		calc_densities_by_cuda << < 1, 1 >> > ();
-		//cudaDeviceSynchronize();
+		cudaDeviceSynchronize();
 		checkCUDAErrors("calc_densities_by_cuda");
 
 	}
@@ -247,7 +242,7 @@ void update_body_by_serial() {
 /**
  * Compute fore of every body by paralle mode (using OPENMP)
  */
-void update_body_by_parallel() {
+void update_body_by_openmp() {
 	// compute the force of every body
 	int j;
 #pragma omp parallel for default(none) shared(N, bodies, forces) schedule(dynamic)
