@@ -11,6 +11,9 @@
 #include "device_launch_parameters.h"
 #include <cuda_runtime.h>
 
+#include "cuda_texture_types.h"
+#include "texture_fetch_functions.hpp"
+
 #define USER_NAME "Xiaowei Zhu"
 
 #define THREADS_PER_BLOCK 128 
@@ -37,6 +40,9 @@ float* hd_densities = NULL;
 
 vector* forces = NULL;	// force(F) of every body
 __device__ vector* d_forces = NULL;
+
+texture<float, 1, cudaReadModeElementType>tex_x;
+texture<float, 1, cudaReadModeElementType>tex_y;
 
 
 // declaration of all functions
@@ -197,8 +203,12 @@ void step(void) {
 		calc_densities();
 	}
 	else if (M == CUDA) {
+		cudaBindTexture(0, tex_x, x_soa, N * sizeof(float));
+		//cudaBindTexture(0, tex_y, y_soa, N * sizeof(float));
 		update_body_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 		checkCUDAErrors("update_body_by_cuda");
+		cudaUnbindTexture(tex_x);
+		//cudaUnbindTexture(tex_y);
 
 		reset_d_densities << <1, 1 >> > ();
 		checkCUDAErrors("reset_d_densities");
@@ -300,6 +310,40 @@ __global__ void update_body_by_cuda() {
 	if (i < d_N) {
 		//printf("\n(x:%f,y:%f,vx:%f,vy:%f,m:%f)", d_bodies_soa->x[i], d_bodies_soa->y[i], d_bodies_soa->vx[i], d_bodies_soa->vy[i], d_bodies_soa->m[i]);
 		// compute the force of every body
+		vector f = { 0, 0 };
+		for (int k = 0; k < d_N; k++) {
+			// skip the influence of body on itself
+			if (k == i) continue;
+			vector s1 = { d_bodies_soa->x[k] - d_bodies_soa->x[i], d_bodies_soa->y[k] - d_bodies_soa->y[i] };
+			vector s2 = { s1.x * d_bodies_soa->m[k], s1.y * d_bodies_soa->m[k] };
+			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
+			f.x = f.x + s2.x / s3;
+			f.y = f.y + s2.y / s3;
+		}
+		f.x = G * d_bodies_soa->m[i] * f.x;
+		f.y = G * d_bodies_soa->m[i] * f.y;
+		d_forces[i].x = f.x;
+		d_forces[i].y = f.y;
+
+		// calc the acceleration of body
+		vector a = { d_forces[i].x / d_bodies_soa->m[i], d_forces[i].y / d_bodies_soa->m[i] };
+		// new velocity
+		vector v_new = { d_bodies_soa->vx[i] + dt * a.x, d_bodies_soa->vy[i] + dt * a.y };
+		// new location
+		vector l_new = { d_bodies_soa->x[i] + dt * v_new.x, d_bodies_soa->y[i] + dt * v_new.y };
+		d_bodies_soa->x[i] = l_new.x;
+		d_bodies_soa->y[i] = l_new.y;
+		d_bodies_soa->vx[i] = v_new.x;
+		d_bodies_soa->vy[i] = v_new.y;
+	}
+}
+
+__global__ void update_body_by_cuda_with_texture() {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < d_N) {
+		//printf("\n(x:%f,y:%f,vx:%f,vy:%f,m:%f)", d_bodies_soa->x[i], d_bodies_soa->y[i], d_bodies_soa->vx[i], d_bodies_soa->vy[i], d_bodies_soa->m[i]);
+		// compute the force of every body
+		printf("\n:tex1Dfetch:%f,real:%f", tex1Dfetch(tex_x, i), d_bodies_soa->x[i]);
 		vector f = { 0, 0 };
 		for (int k = 0; k < d_N; k++) {
 			// skip the influence of body on itself
