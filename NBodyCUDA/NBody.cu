@@ -241,7 +241,7 @@ void step(void) {
 		checkCUDAErrors("calc_densities_by_cuda");
 
 		cudaEventRecord(stop, 0);cudaEventSynchronize(stop);cudaEventElapsedTime(&time, start, stop);
-		printf("\nExecution time was %f ms\n", time);
+		printf("\nCUDA execution time was %f ms\n", time);
 		cudaEventDestroy(start);cudaEventDestroy(stop);
 	}
 }
