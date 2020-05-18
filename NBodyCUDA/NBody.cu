@@ -73,12 +73,10 @@ void checkCUDAErrors(const char* msg);
 void cleanup();
 void perform_simulation();
 
-__global__ void calc_accelerations_by_cuda();
+__global__ void calc_accelerations_by_cuda_with_global();
 __global__ void calc_accelerations_by_cuda_with_texture();
 __global__ void calc_accelerations_by_cuda_with_shared();
-__global__ void calc_densities_by_cuda();
-__global__ void reset_d_densities();
-__global__ void update_bodies_by_cuda();
+__global__ void update_bodies_by_cuda_with_global();
 __global__ void update_bodies_by_cuda_with_texture();
 __global__ void update_bodies_by_cuda_with_shared();
 
@@ -230,9 +228,9 @@ void step(void) {
 		CUDA_OPT_MODE opt_mode = TEXTURE;
 		switch (opt_mode) {
 		case GLOBAL:
-			calc_accelerations_by_cuda << <BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
+			calc_accelerations_by_cuda_with_global << <BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
 			checkCUDAErrors("calc_accelerations_by_cuda");
-			update_bodies_by_cuda << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
+			update_bodies_by_cuda_with_global << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
 			break;
 		case SHARED:
 			calc_accelerations_by_cuda_with_shared << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
@@ -346,7 +344,7 @@ void checkCUDAErrors(const char* msg) {
 	}
 }
 
-__global__ void calc_accelerations_by_cuda() {
+__global__ void calc_accelerations_by_cuda_with_global() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		//printf("\n(x:%f,y:%f,vx:%f,vy:%f,m:%f)", d_bodies_soa->x[i], d_bodies_soa->y[i], d_bodies_soa->vx[i], d_bodies_soa->vy[i], d_bodies_soa->m[i]);
@@ -370,7 +368,7 @@ __global__ void calc_accelerations_by_cuda() {
 	}
 }
 
-__global__ void update_bodies_by_cuda() {
+__global__ void update_bodies_by_cuda_with_global() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		// new velocity
@@ -509,12 +507,11 @@ __global__ void update_bodies_by_cuda_with_shared() {
 		int y = (int)ceil(y_arr[i] / scale) - 1;
 		// the index of one dimensional array
 		int index = y * d_D + x;
-		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
 		atomicAdd(&d_densities[index], (float)(1.0 * d_D / d_N));
 	}
 }
 
-__global__ void calc_densities_by_cuda() {
+__global__ void calc_densities_by_cuda_with_global() {
 	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
 		printf("\nerror: No more than one thread.");
 		return;
@@ -527,7 +524,6 @@ __global__ void calc_densities_by_cuda() {
 		int y = (int)ceil(d_bodies_soa->y[i] / scale) - 1;
 		// the index of one dimensional array
 		int index = y * d_D + x;
-		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
 		atomicAdd(&d_densities[index], (float)(1.0 * d_D / d_N));
 	}
 }
