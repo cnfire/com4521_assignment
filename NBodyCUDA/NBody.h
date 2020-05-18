@@ -18,7 +18,7 @@ struct nbody_soa {
 typedef struct nbody_soa nbody_soa;
 
 typedef enum MODE {
-	CPU, OPENMP, CUDA
+	CPU, OPENMP, CUDA, UNKNOWN
 } MODE;
 
 

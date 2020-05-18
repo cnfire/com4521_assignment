@@ -206,10 +206,6 @@ void step(void) {
 		cudaDeviceSynchronize();
 		checkCUDAErrors("calc_densities_by_cuda");
 	}
-	else {
-		fprintf(stderr, "\n%d Mode is not supported", M);
-		exit(1);
-	}
 }
 
 
@@ -453,6 +449,7 @@ MODE str2enum(char* str) {
 	if (strcmp(str, "CPU") == 0) return CPU;
 	if (strcmp(str, "OPENMP") == 0) return OPENMP;
 	if (strcmp(str, "CUDA") == 0) return CUDA;
+	return UNKNOWN;
 }
 
 /**
@@ -461,11 +458,15 @@ MODE str2enum(char* str) {
 void parse_parameter(int argc, char* argv[]) {
 	if (!(argc == 4 || argc == 6 || argc == 8)) {
 		fprintf(stderr, "\nInput parameter format is incorrect, please check.\n");
-		exit(0);
+		exit(1);
 	}
 	N = atoi(argv[1]);
 	D = atoi(argv[2]);
 	M = str2enum(argv[3]);
+	if (M == UNKNOWN) {
+		fprintf(stderr, "\nUnknown mode, please check!.\n");
+		exit(1);
+	}
 	if (argc >= 6) {
 		I = atoi(argv[5]);
 	}
