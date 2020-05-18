@@ -32,7 +32,7 @@ nbody* bodies = NULL;
 nbody_soa* bodies_soa = NULL;
 __device__ nbody_soa* d_bodies_soa = NULL;
 nbody_soa* hd_bodies_soa = NULL;
-float* x_soa, * y_soa;
+float* x_soa, * y_soa, * vx_soa, * vy_soa, * m_soa;
 
 float* densities = NULL;	// store the density values of the D*D locations (acitvity map)
 __device__ float* d_densities = NULL;
@@ -43,6 +43,9 @@ __device__ vector* d_forces = NULL;
 
 texture<float, 1, cudaReadModeElementType>tex_x;
 texture<float, 1, cudaReadModeElementType>tex_y;
+texture<float, 1, cudaReadModeElementType>tex_vx;
+texture<float, 1, cudaReadModeElementType>tex_vy;
+texture<float, 1, cudaReadModeElementType>tex_m;
 
 
 // declaration of all functions
@@ -168,9 +171,9 @@ void set_bodies_soa() {
 	int size_b = N * sizeof(float);
 	cudaMalloc((void**)&x_soa, size_b); cudaMemcpy(x_soa, bodies_soa->x, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->x), &x_soa, sizeof(float*), cudaMemcpyHostToDevice);
 	cudaMalloc((void**)&y_soa, size_b); cudaMemcpy(y_soa, bodies_soa->y, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->y), &y_soa, sizeof(float*), cudaMemcpyHostToDevice);
-	float* vx; cudaMalloc((void**)&vx, size_b); cudaMemcpy(vx, bodies_soa->vx, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vx), &vx, sizeof(float*), cudaMemcpyHostToDevice);
-	float* vy; cudaMalloc((void**)&vy, size_b); cudaMemcpy(vy, bodies_soa->vy, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vy), &vy, sizeof(float*), cudaMemcpyHostToDevice);
-	float* m; cudaMalloc((void**)&m, size_b); cudaMemcpy(m, bodies_soa->m, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->m), &m, sizeof(float*), cudaMemcpyHostToDevice);
+	cudaMalloc((void**)&vx_soa, size_b); cudaMemcpy(vx_soa, bodies_soa->vx, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vx), &vx_soa, sizeof(float*), cudaMemcpyHostToDevice);
+	cudaMalloc((void**)&vy_soa, size_b); cudaMemcpy(vy_soa, bodies_soa->vy, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->vy), &vy_soa, sizeof(float*), cudaMemcpyHostToDevice);
+	cudaMalloc((void**)&m_soa, size_b); cudaMemcpy(m_soa, bodies_soa->m, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->m), &m_soa, sizeof(float*), cudaMemcpyHostToDevice);
 	checkCUDAErrors("cuda malloc d_bodies_soa");
 }
 
@@ -364,7 +367,7 @@ __global__ void update_body_by_cuda_with_texture() {
 		// new velocity
 		vector v_new = { d_bodies_soa->vx[i] + dt * a.x, d_bodies_soa->vy[i] + dt * a.y };
 		// new location
-		vector l_new = { tex1Dfetch(tex_x, i) + dt * v_new.x, d_bodies_soa->y[i] + dt * v_new.y };
+		vector l_new = { tex1Dfetch(tex_x, i) + dt * v_new.x,  tex1Dfetch(tex_y, i) + dt * v_new.y };
 		d_bodies_soa->x[i] = l_new.x;
 		d_bodies_soa->y[i] = l_new.y;
 		d_bodies_soa->vx[i] = v_new.x;
