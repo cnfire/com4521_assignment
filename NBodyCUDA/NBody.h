@@ -21,10 +21,14 @@ typedef enum MODE {
 	CPU, OPENMP, CUDA, UNKNOWN
 } MODE;
 
-
 struct vector {
 	float x, y;
 };
 typedef struct vector vector;
+
+// Optimization mode for CUDA
+typedef enum CUDA_OPT_MODE {
+	GLOBAL, SHARED, TEXTURE, READ_ONLY
+} CUDA_OPT_MODE;
 
 #endif    //__NBODY_HEADER__

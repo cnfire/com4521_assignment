@@ -16,7 +16,7 @@
 
 #define USER_NAME "Xiaowei Zhu"
 
-#define THREADS_PER_BLOCK 128 
+#define THREADS_PER_BLOCK 128
 
 int N = 0;	// the number of bodies to simulate
 __constant__ int d_N = 0;
@@ -38,8 +38,8 @@ float* densities = NULL;	// store the density values of the D*D locations (acitv
 __device__ float* d_densities = NULL;
 float* hd_densities = NULL;
 
-vector* forces = NULL;	// force(F) of every body
-__device__ vector* d_forces = NULL;
+vector* accelerations = NULL;	// force(F) of every body
+__device__ vector* d_accelerations = NULL;
 
 texture<float, 1, cudaReadModeElementType>tex_x;
 texture<float, 1, cudaReadModeElementType>tex_y;
@@ -54,8 +54,8 @@ void parse_parameter(int argc, char* argv[]);
 void init_data_by_random();
 void load_data_from_file();
 void step(void);
-void update_body_by_serial();
-void update_body_by_openmp();
+void calc_accelerations_by_serial();
+void calc_accelerations_by_openmp();
 void set_bodies_soa();
 void calc_densities();
 void calc_densities_by_serial();
@@ -69,11 +69,14 @@ void checkCUDAErrors(const char* msg);
 void cleanup();
 void perform_simulation();
 
-__global__ void update_body_by_cuda();
-__global__ void update_body_by_cuda_with_texture();
-__global__ void update_body_by_cuda_with_sharedmem();
+__global__ void calc_accelerations_by_cuda();
+__global__ void calc_accelerations_by_cuda_with_texture();
+__global__ void calc_accelerations_by_cuda_with_shared();
 __global__ void calc_densities_by_cuda();
 __global__ void reset_d_densities();
+__global__ void update_bodies_by_cuda();
+__global__ void update_bodies_by_cuda_with_texture();
+__global__ void update_bodies_by_cuda_with_shared();
 
 int main(int argc, char* argv[]) {
 	// Processes the command line arguments
@@ -83,7 +86,7 @@ int main(int argc, char* argv[]) {
 
 	// Initialize all values are zero
 	densities = (float*)calloc(D * D, sizeof(float));
-	forces = (vector*)malloc(N * sizeof(vector));
+	accelerations = (vector*)malloc(N * sizeof(vector));
 
 	// Init data for n bodies, read initial data from file or generate random data.
 	if (input_file == NULL) {
@@ -102,11 +105,11 @@ int main(int argc, char* argv[]) {
 		cudaMemcpyToSymbol(d_N, &N, sizeof(int));
 		cudaMemcpyToSymbol(d_D, &D, sizeof(int));
 
-		// Set for forces
-		vector* hd_forces = NULL;
-		cudaMalloc((void**)&hd_forces, N * sizeof(vector));
-		checkCUDAErrors("cuda malloc d_forces");
-		cudaMemcpyToSymbol(d_forces, &hd_forces, sizeof(hd_forces));
+		// Set for accelerations
+		vector* hd_accelerations = NULL;
+		cudaMalloc((void**)&hd_accelerations, N * sizeof(vector));
+		checkCUDAErrors("cuda malloc d_accelerations");
+		cudaMemcpyToSymbol(d_accelerations, &hd_accelerations, sizeof(hd_accelerations));
 
 		cudaMalloc((void**)&hd_densities, D * D * sizeof(float));
 		checkCUDAErrors("cuda malloc d_densities");
@@ -153,7 +156,6 @@ void perform_simulation() {
 			step();
 			double elapsed = omp_get_wtime() - begin;
 			//printf("\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
-
 		}
 		// stop timer
 		double total = omp_get_wtime() - begin_outer;
@@ -188,7 +190,7 @@ void cleanup() {
 	printf("\nClean memory...\n");
 	free(bodies);
 	free(densities);
-	free(forces);
+	free(accelerations);
 	cudaFree(x_soa); cudaFree(y_soa); cudaFree(vx_soa); cudaFree(vy_soa); cudaFree(m_soa);
 	cudaFree(hd_bodies_soa);
 	cudaFree(hd_densities);
@@ -202,12 +204,14 @@ void cleanup() {
 void step(void) {
 	// compute the force of every body with different way
 	if (M == CPU) {
-		update_body_by_serial();
+		calc_accelerations_by_serial();
+		update_location_velocity();
 		// Calculate density for the D*D locations (activity map)
 		calc_densities();
 	}
 	else if (M == OPENMP) {
-		update_body_by_openmp();
+		calc_accelerations_by_openmp();
+		update_location_velocity();
 		calc_densities();
 	}
 	else if (M == CUDA) {
@@ -218,29 +222,40 @@ void step(void) {
 		//int using_texture = N > 10000000 ? 1 : 0;
 		int using_texture = 0;
 
-		if (!using_texture) {
-			update_body_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-			//update_body_by_cuda_with_sharedmem << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-			checkCUDAErrors("update_body_by_cuda");
-		}
-		else {
+		CUDA_OPT_MODE opt_mode;
+		switch (opt_mode)
+		{
+		case GLOBAL:
+			calc_accelerations_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+			//calc_accelerations_by_cuda_with_sharedmem << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+			checkCUDAErrors("calc_accelerations_by_cuda");
+			break;
+		case SHARED:
+			break;
+		case TEXTURE:
 			int size_f = N * sizeof(float);
 			cudaBindTexture(0, tex_x, x_soa, size_f); cudaBindTexture(0, tex_y, y_soa, size_f);
 			cudaBindTexture(0, tex_vx, vx_soa, size_f); cudaBindTexture(0, tex_vy, vy_soa, size_f);
 			cudaBindTexture(0, tex_m, m_soa, size_f);
 
-			update_body_by_cuda_with_texture << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+			calc_accelerations_by_cuda_with_texture << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 
-			checkCUDAErrors("update_body_by_cuda_with_texture");
+			checkCUDAErrors("calc_accelerations_by_cuda_with_texture");
 			cudaUnbindTexture(tex_x); cudaUnbindTexture(tex_y);
 			cudaUnbindTexture(tex_vx); cudaUnbindTexture(tex_vy);
 			cudaUnbindTexture(tex_m);
-
+			break;
+		case READ_ONLY:
+			break;
+		default:
+			break;
 		}
-		reset_d_densities << <1, 1 >> > ();
+
+		cudaMemset();
+		/*reset_d_densities << <1, 1 >> > ();
 		checkCUDAErrors("reset_d_densities");
 		calc_densities_by_cuda << < 1, 1 >> > ();
-		checkCUDAErrors("calc_densities_by_cuda");
+		checkCUDAErrors("calc_densities_by_cuda");*/
 
 		cudaEventRecord(stop, 0); cudaEventSynchronize(stop); cudaEventElapsedTime(&time, start, stop); cudaEventDestroy(start); cudaEventDestroy(stop);
 		//printf("\nCUDA execution time was %f ms", time);
@@ -254,7 +269,7 @@ void step(void) {
 /**
  * Compute fore of every body by serial mode
  */
-void update_body_by_serial() {
+void calc_accelerations_by_serial() {
 	// compute the force of every body
 	for (int j = 0; j < N; j++) {
 		nbody* body_j = &bodies[j];
@@ -271,30 +286,20 @@ void update_body_by_serial() {
 		}
 		f.x = G * body_j->m * f.x;
 		f.y = G * body_j->m * f.y;
-		forces[j].x = f.x;
-		forces[j].y = f.y;
 
-		// Update location and velocity of n bodies
 		// calc the acceleration of body
-		vector a = { forces[j].x / body_j->m, forces[j].y / body_j->m };
-		// new velocity
-		vector v_new = { body_j->vx + dt * a.x, body_j->vy + dt * a.y };
-		// new location
-		vector l_new = { body_j->x + dt * v_new.x, body_j->y + dt * v_new.y };
-		body_j->x = l_new.x;
-		body_j->y = l_new.y;
-		body_j->vx = v_new.x;
-		body_j->vy = v_new.y;
+		accelerations[j].x = f.x / body_j->m;
+		accelerations[j].y = f.y / body_j->m;
 	}
 }
 
 /**
  * Compute fore of every body by paralle mode (using OPENMP)
  */
-void update_body_by_openmp() {
+void calc_accelerations_by_openmp() {
 	// compute the force of every body
 	int j;
-#pragma omp parallel for default(none) shared(N, bodies, forces) schedule(dynamic)
+#pragma omp parallel for default(none) shared(N, bodies, accelerations) schedule(dynamic)
 	for (j = 0; j < N; j++) {
 		nbody* body_j = &bodies[j];
 		vector f = { 0, 0 };
@@ -310,34 +315,38 @@ void update_body_by_openmp() {
 		}
 		f.x = G * body_j->m * f.x;
 		f.y = G * body_j->m * f.y;
-		forces[j].x = f.x;
-		forces[j].y = f.y;
 
-		// Update location and velocity of n bodies
 		// calc the acceleration of body
-		vector a = { forces[j].x / body_j->m, forces[j].y / body_j->m };
-		// new velocity
-		vector v_new = { body_j->vx + dt * a.x, body_j->vy + dt * a.y };
-		// new location
-		vector l_new = { body_j->x + dt * v_new.x, body_j->y + dt * v_new.y };
-		body_j->x = l_new.x;
-		body_j->y = l_new.y;
-		body_j->vx = v_new.x;
-		body_j->vy = v_new.y;
+		accelerations[j].x = f.x / body_j->m;
+		accelerations[j].y = f.y / body_j->m;
 	}
 }
 
+// Update location and velocity of n bodies (GPU and OPENMP mode)
+void update_location_velocity() {
+	for (int i = 0; i < N; i++) {
+		nbody* body = &bodies[i];
+		// new velocity
+		vector v_new = { body->vx + dt * accelerations[i].x, body->vy + dt * accelerations[i].y };
+		// new location
+		vector l_new = { body->x + dt * v_new.x, body->y + dt * v_new.y };
+		body->x = l_new.x;
+		body->y = l_new.y;
+		body->vx = v_new.x;
+		body->vy = v_new.y;
+	}
+}
+
+
 void checkCUDAErrors(const char* msg) {
-	//cudaError_t err = cudaGetLastError();
 	cudaError_t err = cudaGetLastError();
 	if (cudaSuccess != err) {
 		fprintf(stderr, "\nCUDA ERROR: %s: %s.\n", msg, cudaGetErrorString(err));
-		//printf("Error: %s:%d\n,", __FILE__, __LINE__);
 		exit(EXIT_FAILURE);
 	}
 }
 
-__global__ void update_body_by_cuda() {
+__global__ void calc_accelerations_by_cuda() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		//printf("\n(x:%f,y:%f,vx:%f,vy:%f,m:%f)", d_bodies_soa->x[i], d_bodies_soa->y[i], d_bodies_soa->vx[i], d_bodies_soa->vy[i], d_bodies_soa->m[i]);
@@ -354,23 +363,38 @@ __global__ void update_body_by_cuda() {
 		}
 		f.x = G * d_bodies_soa->m[i] * f.x;
 		f.y = G * d_bodies_soa->m[i] * f.y;
-		d_forces[i].x = f.x;
-		d_forces[i].y = f.y;
 
 		// calc the acceleration of body
-		vector a = { d_forces[i].x / d_bodies_soa->m[i], d_forces[i].y / d_bodies_soa->m[i] };
+		d_accelerations[i].x = f.x / d_bodies_soa->m[i];
+		d_accelerations[i].y = f.y / d_bodies_soa->m[i];
+	}
+}
+
+__global__ void update_bodies_by_cuda() {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < d_N) {
 		// new velocity
-		vector v_new = { d_bodies_soa->vx[i] + dt * a.x, d_bodies_soa->vy[i] + dt * a.y };
+		vector v_new = { d_bodies_soa->vx[i] + dt * accelerations[i].x, d_bodies_soa->vy[i] + dt * accelerations[i].y };
 		// new location
 		vector l_new = { d_bodies_soa->x[i] + dt * v_new.x, d_bodies_soa->y[i] + dt * v_new.y };
 		d_bodies_soa->x[i] = l_new.x;
 		d_bodies_soa->y[i] = l_new.y;
 		d_bodies_soa->vx[i] = v_new.x;
 		d_bodies_soa->vy[i] = v_new.y;
+
+		double scale = 1.0 / d_D;
+		// x-axis coordinate of D*D locations
+		int x = (int)ceil(d_bodies_soa->x[i] / scale) - 1;
+		// y-axis coordinate of D*D locations
+		int y = (int)ceil(d_bodies_soa->y[i] / scale) - 1;
+		// the index of one dimensional array
+		int index = y * d_D + x;
+		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
+		atomicAdd(&d_densities[index], (float)(1.0 * d_D / d_N));
 	}
 }
 
-__global__ void update_body_by_cuda_with_texture() {
+__global__ void calc_accelerations_by_cuda_with_texture() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		// compute the force of every body
@@ -387,24 +411,40 @@ __global__ void update_body_by_cuda_with_texture() {
 		}
 		f.x = G * d_bodies_soa->m[i] * f.x;
 		f.y = G * d_bodies_soa->m[i] * f.y;
-		d_forces[i].x = f.x;
-		d_forces[i].y = f.y;
 
 		// calc the acceleration of body
-		vector a = { d_forces[i].x / d_bodies_soa->m[i], d_forces[i].y / d_bodies_soa->m[i] };
+		d_accelerations[i].x = f.x / d_bodies_soa->m[i];
+		d_accelerations[i].y = f.y / d_bodies_soa->m[i];
+
+	}
+}
+
+__global__ void update_bodies_by_cuda_with_texture() {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < d_N) {
 		// new velocity
-		vector v_new = { d_bodies_soa->vx[i] + dt * a.x, d_bodies_soa->vy[i] + dt * a.y };
+		vector v_new = { d_bodies_soa->vx[i] + dt * d_accelerations[i].x, d_bodies_soa->vy[i] + dt * d_accelerations[i].y };
 		// new location
 		vector l_new = { tex1Dfetch(tex_x, i) + dt * v_new.x,  tex1Dfetch(tex_y, i) + dt * v_new.y };
 		d_bodies_soa->x[i] = l_new.x;
 		d_bodies_soa->y[i] = l_new.y;
 		d_bodies_soa->vx[i] = v_new.x;
 		d_bodies_soa->vy[i] = v_new.y;
+
+		double scale = 1.0 / d_D;
+		// x-axis coordinate of D*D locations
+		int x = (int)ceil(tex1Dfetch(tex_x, i) / scale) - 1;
+		// y-axis coordinate of D*D locations
+		int y = (int)ceil(tex1Dfetch(tex_y, i) / scale) - 1;
+		// the index of one dimensional array
+		int index = y * d_D + x;
+		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
+		atomicAdd(&d_densities[index], (float)(1.0 * d_D / d_N));
 	}
 }
 
 // when N < BLOCK_SIZE
-__global__ void update_body_by_cuda_with_sharedmem() {
+__global__ void calc_accelerations_by_cuda_with_shared() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	__shared__ float x_arr[THREADS_PER_BLOCK];
 	__shared__ float y_arr[THREADS_PER_BLOCK];
@@ -418,7 +458,6 @@ __global__ void update_body_by_cuda_with_sharedmem() {
 		vx_arr[idx] = d_bodies_soa->vx[i];
 		vy_arr[idx] = d_bodies_soa->vy[i];
 		m_arr[idx] = d_bodies_soa->m[i];
-		x_arr[idx] = d_bodies_soa->x[i];
 		__syncthreads();
 
 		// compute the force of every body
@@ -434,19 +473,62 @@ __global__ void update_body_by_cuda_with_sharedmem() {
 		}
 		f.x = G * m_arr[i] * f.x;
 		f.y = G * m_arr[i] * f.y;
-		d_forces[i].x = f.x;
-		d_forces[i].y = f.y;
 
 		// calc the acceleration of body
-		vector a = { d_forces[i].x / m_arr[i], d_forces[i].y / m_arr[i] };
+		d_accelerations[i].x = f.x / m_arr[i];
+		d_accelerations[i].y = f.y / m_arr[i];
+	}
+}
+
+__global__ void update_bodies_by_cuda_with_shared() {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	__shared__ float x_arr[THREADS_PER_BLOCK];
+	__shared__ float y_arr[THREADS_PER_BLOCK];
+	__shared__ float vx_arr[THREADS_PER_BLOCK];
+	__shared__ float vy_arr[THREADS_PER_BLOCK];
+	int idx = threadIdx.x;
+	if (i < d_N) {
+		x_arr[idx] = d_bodies_soa->x[i];
+		y_arr[idx] = d_bodies_soa->y[i];
+		vx_arr[idx] = d_bodies_soa->vx[i];
+		vy_arr[idx] = d_bodies_soa->vy[i];
+		__syncthreads();
 		// new velocity
-		vector v_new = { vx_arr[i] + dt * a.x, vy_arr[i] + dt * a.y };
+		vector v_new = { vx_arr[i] + dt * d_accelerations[i].x, vy_arr[i] + dt * d_accelerations[i].y };
 		// new location
 		vector l_new = { x_arr[i] + dt * v_new.x,  y_arr[i] + dt * v_new.y };
 		d_bodies_soa->x[i] = l_new.x;
 		d_bodies_soa->y[i] = l_new.y;
 		d_bodies_soa->vx[i] = v_new.x;
 		d_bodies_soa->vy[i] = v_new.y;
+
+		double scale = 1.0 / d_D;
+		// x-axis coordinate of D*D locations
+		int x = (int)ceil(x_arr[i] / scale) - 1;
+		// y-axis coordinate of D*D locations
+		int y = (int)ceil(y_arr[i] / scale) - 1;
+		// the index of one dimensional array
+		int index = y * d_D + x;
+		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
+		atomicAdd(&d_densities[index], (float)(1.0 * d_D / d_N));
+	}
+}
+
+__global__ void calc_densities_by_cuda() {
+	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
+		printf("\nerror: No more than one thread.");
+		return;
+	}
+	for (int i = 0; i < d_N; i++) {
+		double scale = 1.0 / d_D;
+		// x-axis coordinate of D*D locations
+		int x = (int)ceil(d_bodies_soa->x[i] / scale) - 1;
+		// y-axis coordinate of D*D locations
+		int y = (int)ceil(d_bodies_soa->y[i] / scale) - 1;
+		// the index of one dimensional array
+		int index = y * d_D + x;
+		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
+		atomicAdd(&d_densities[index], (float)(1.0 * d_D / d_N));
 	}
 }
 
@@ -487,7 +569,7 @@ void calc_densities_by_serial() {
 void calc_densities_with_critical() {
 	int i;
 	double scale = 1.0 / D;
-#pragma omp parallel for default(none) shared(densities, scale, N, D, bodies, forces)
+#pragma omp parallel for default(none) shared(densities, scale, N, D, bodies)
 	for (i = 0; i < N; i++) {
 		nbody* body = &bodies[i];
 		// x-axis coordinate of D*D locations
@@ -507,7 +589,7 @@ void calc_densities_with_critical() {
 void calc_densities_with_atomic() {
 	int i;
 	double scale = 1.0 / D;
-#pragma omp parallel for default(none) shared(densities, scale, N, D, bodies, forces)
+#pragma omp parallel for default(none) shared(densities, scale, N, D, bodies)
 	for (i = 0; i < N; i++) {
 		nbody* body = &bodies[i];
 		// x-axis coordinate of D*D locations
@@ -534,23 +616,7 @@ __global__ void reset_d_densities() {
 	}
 }
 
-__global__ void calc_densities_by_cuda() {
-	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
-		printf("\nerror: No more than one thread.");
-		return;
-	}
-	for (int i = 0; i < d_N; i++) {
-		double scale = 1.0 / d_D;
-		// x-axis coordinate of D*D locations
-		int x = (int)ceil(d_bodies_soa->x[i] / scale) - 1;
-		// y-axis coordinate of D*D locations
-		int y = (int)ceil(d_bodies_soa->y[i] / scale) - 1;
-		// the index of one dimensional array
-		int index = y * d_D + x;
-		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
-		atomicAdd(&d_densities[index], (float)(1.0 * d_D / d_N));
-	}
-}
+
 
 void print_help() {
 	printf("nbody_%s N D M [-i I] [-i input_file]\n", USER_NAME);
@@ -580,14 +646,14 @@ MODE str2enum(char* str) {
 void parse_parameter(int argc, char* argv[]) {
 	if (!(argc == 4 || argc == 6 || argc == 8)) {
 		fprintf(stderr, "\nInput parameter format is incorrect, please check.\n");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 	N = atoi(argv[1]);
 	D = atoi(argv[2]);
 	M = str2enum(argv[3]);
 	if (M == UNKNOWN) {
 		fprintf(stderr, "\nUnknown mode, please check!.\n");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 	if (argc >= 6) {
 		I = atoi(argv[5]);
@@ -630,7 +696,7 @@ void load_data_from_file() {
 	file = fopen(input_file, "rb");
 	if (file == NULL) {
 		fprintf(stderr, "Error: Could not find file:%s \n", input_file);
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 	int i = 0;
 	while (!feof(file)) {
@@ -658,7 +724,7 @@ void load_data_from_file() {
 	fclose(file);
 	if (i != N) {
 		fprintf(stderr, "\nN is %d and the number of body in csv file is %d, not equal!", N, i);
-		exit(0);
+		exit(EXIT_SUCCESS);
 	}
 }
 
