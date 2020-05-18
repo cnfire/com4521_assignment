@@ -58,6 +58,7 @@ char* get_string_in_range(char string[], int start, int end);
 char** split(const char* string, char dim, int size);
 void checkCUDAErrors(const char* msg);
 void cleanup();
+void perform_simulation();
 
 __global__ void update_body_by_cuda();
 __global__ void calc_densities_by_cuda();
@@ -104,6 +105,15 @@ int main(int argc, char* argv[]) {
 		set_bodies_soa();
 	}
 
+	// Start to simulate
+	perform_simulation();
+
+	// Reclaiming memory
+	cleanup();
+	return 0;
+}
+
+void perform_simulation() {
 	// Depending on program arguments, either configure and start the visualiser or perform a fixed number of simulation steps (then output the timing results).
 	char* mode = M == CPU ? "CPU" : M == OPENMP ? "OPENMP" : "CUDA";
 	if (I == 0) {
@@ -126,19 +136,12 @@ int main(int argc, char* argv[]) {
 		// start timer
 		double begin_outer = omp_get_wtime();
 		for (int i = 0; i < I; i++) {
-			double begin = omp_get_wtime();
 			step();
-			double elapsed = omp_get_wtime() - begin;
-			printf("\n\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
-			//print_bodies();
 		}
-
-		//print_densities();
 		// stop timer
 		double total = omp_get_wtime() - begin_outer;
 		printf("\n\nFully Complete in %d seconds %f milliseconds\n", (int)total, 1000 * (total - (int)total));
 	}
-	return 0;
 }
 
 void set_bodies_soa() {
@@ -165,10 +168,16 @@ void set_bodies_soa() {
 }
 
 void cleanup() {
+	printf("\nclean....\n");
+	free(bodies);
+	free(densities);
+	free(forces);
 	//free(a); free(b); free(c);
 	//cudaFree(d_a); cudaFree(d_b); cudaFree(d_c);
 	//checkCUDAError("CUDA cleanup");
 }
+
+
 
 /**
  * Perform the main simulation of the NBody system (Simulation within a single iteration)
