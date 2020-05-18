@@ -71,6 +71,7 @@ void perform_simulation();
 
 __global__ void update_body_by_cuda();
 __global__ void update_body_by_cuda_with_texture();
+__global__ void update_body_by_cuda_with_sharedmem();
 __global__ void calc_densities_by_cuda();
 __global__ void reset_d_densities();
 
@@ -151,7 +152,7 @@ void perform_simulation() {
 			double begin = omp_get_wtime();
 			step();
 			double elapsed = omp_get_wtime() - begin;
-			printf("\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
+			//printf("\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
 
 		}
 		// stop timer
@@ -212,13 +213,14 @@ void step(void) {
 	else if (M == CUDA) {
 		float time;
 		cudaEvent_t start, stop;
-		cudaEventCreate(&start); cudaEventCreate(&stop); 
+		cudaEventCreate(&start); cudaEventCreate(&stop);
 		cudaEventRecord(start, 0);
 		//int using_texture = N > 10000000 ? 1 : 0;
-		int using_texture = 1;
-		
+		int using_texture = 0;
+
 		if (!using_texture) {
 			update_body_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+			//update_body_by_cuda_with_sharedmem << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
 			checkCUDAErrors("update_body_by_cuda");
 		}
 		else {
@@ -226,9 +228,9 @@ void step(void) {
 			cudaBindTexture(0, tex_x, x_soa, size_f); cudaBindTexture(0, tex_y, y_soa, size_f);
 			cudaBindTexture(0, tex_vx, vx_soa, size_f); cudaBindTexture(0, tex_vy, vy_soa, size_f);
 			cudaBindTexture(0, tex_m, m_soa, size_f);
-			
+
 			update_body_by_cuda_with_texture << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-		
+
 			checkCUDAErrors("update_body_by_cuda_with_texture");
 			cudaUnbindTexture(tex_x); cudaUnbindTexture(tex_y);
 			cudaUnbindTexture(tex_vx); cudaUnbindTexture(tex_vy);
@@ -241,10 +243,10 @@ void step(void) {
 		checkCUDAErrors("calc_densities_by_cuda");
 
 		cudaEventRecord(stop, 0); cudaEventSynchronize(stop); cudaEventElapsedTime(&time, start, stop); cudaEventDestroy(start); cudaEventDestroy(stop);
-		printf("\nCUDA execution time was %f ms", time);
+		//printf("\nCUDA execution time was %f ms", time);
 
 		cudaDeviceSynchronize();
-		
+
 	}
 }
 
@@ -401,33 +403,46 @@ __global__ void update_body_by_cuda_with_texture() {
 	}
 }
 
+// when N < BLOCK_SIZE
 __global__ void update_body_by_cuda_with_sharedmem() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	__shared__ float[BLOC]
+	__shared__ float x_arr[THREADS_PER_BLOCK];
+	__shared__ float y_arr[THREADS_PER_BLOCK];
+	__shared__ float vx_arr[THREADS_PER_BLOCK];
+	__shared__ float vy_arr[THREADS_PER_BLOCK];
+	__shared__ float m_arr[THREADS_PER_BLOCK];
+	int idx = threadIdx.x;
 	if (i < d_N) {
+		x_arr[idx] = d_bodies_soa->x[i];
+		y_arr[idx] = d_bodies_soa->y[i];
+		vx_arr[idx] = d_bodies_soa->vx[i];
+		vy_arr[idx] = d_bodies_soa->vy[i];
+		m_arr[idx] = d_bodies_soa->m[i];
+		x_arr[idx] = d_bodies_soa->x[i];
+		__syncthreads();
+
 		// compute the force of every body
-		//printf("\n:tex1Dfetch:%f,real:%f", tex1Dfetch(tex_x, i), d_bodies_soa->x[i]);
 		vector f = { 0, 0 };
 		for (int k = 0; k < d_N; k++) {
 			// skip the influence of body on itself
 			if (k == i) continue;
-			vector s1 = { tex1Dfetch(tex_x, k) - tex1Dfetch(tex_x, i), tex1Dfetch(tex_y, k) - tex1Dfetch(tex_y, i) };
-			vector s2 = { s1.x * d_bodies_soa->m[k], s1.y * d_bodies_soa->m[k] };
+			vector s1 = { x_arr[k] - x_arr[i],y_arr[k] - y_arr[i] };
+			vector s2 = { s1.x * m_arr[k], s1.y * m_arr[k] };
 			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
-		f.x = G * d_bodies_soa->m[i] * f.x;
-		f.y = G * d_bodies_soa->m[i] * f.y;
+		f.x = G * m_arr[i] * f.x;
+		f.y = G * m_arr[i] * f.y;
 		d_forces[i].x = f.x;
 		d_forces[i].y = f.y;
 
 		// calc the acceleration of body
-		vector a = { d_forces[i].x / d_bodies_soa->m[i], d_forces[i].y / d_bodies_soa->m[i] };
+		vector a = { d_forces[i].x / m_arr[i], d_forces[i].y / m_arr[i] };
 		// new velocity
-		vector v_new = { d_bodies_soa->vx[i] + dt * a.x, d_bodies_soa->vy[i] + dt * a.y };
+		vector v_new = { vx_arr[i] + dt * a.x, vy_arr[i] + dt * a.y };
 		// new location
-		vector l_new = { tex1Dfetch(tex_x, i) + dt * v_new.x,  tex1Dfetch(tex_y, i) + dt * v_new.y };
+		vector l_new = { x_arr[i] + dt * v_new.x,  y_arr[i] + dt * v_new.y };
 		d_bodies_soa->x[i] = l_new.x;
 		d_bodies_soa->y[i] = l_new.y;
 		d_bodies_soa->vx[i] = v_new.x;
