@@ -146,8 +146,13 @@ void perform_simulation() {
 		// start timer
 		double begin_outer = omp_get_wtime();
 		for (int i = 0; i < I; i++) {
-			printf("\n\nIteration epoch:%d...", i, i);
+			/*printf("\n\nIteration epoch:%d...", i, i);
+			step();*/
+			double begin = omp_get_wtime();
 			step();
+			double elapsed = omp_get_wtime() - begin;
+			printf("\n\nIteration epoch:%d, Complete in %d seconds %f milliseconds", i, (int)elapsed, 1000 * (elapsed - (int)elapsed));
+
 		}
 		// stop timer
 		double total = omp_get_wtime() - begin_outer;
@@ -188,7 +193,6 @@ void cleanup() {
 	cudaFree(hd_densities);
 	checkCUDAErrors("CUDA cleanup");
 }
-
 
 
 /**
@@ -243,7 +247,7 @@ void step(void) {
 		cudaEventElapsedTime(&time, start, stop);
 
 		//output result
-		printf("\tExecution time was %f ms\n", time);
+		printf("\nExecution time was %f ms\n", time);
 
 		cudaEventDestroy(start);
 		cudaEventDestroy(stop);
