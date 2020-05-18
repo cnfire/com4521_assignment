@@ -227,13 +227,12 @@ void step(void) {
 		cudaMemset(hd_densities, 0, size_t(D * D) * sizeof(float));
 		checkCUDAErrors("cudaMemset");
 		int BLOCKS_PER_GRID = N / THREADS_PER_BLOCK + 1;
-		CUDA_OPT_MODE opt_mode = GLOBAL;
+		CUDA_OPT_MODE opt_mode = TEXTURE;
 		switch (opt_mode) {
 		case GLOBAL:
 			calc_accelerations_by_cuda << <BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
 			checkCUDAErrors("calc_accelerations_by_cuda");
 			update_bodies_by_cuda << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
-
 			break;
 		case SHARED:
 			calc_accelerations_by_cuda_with_shared << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
@@ -259,16 +258,10 @@ void step(void) {
 			break;
 		}
 
-		/*reset_d_densities << <1, 1 >> > ();
-		checkCUDAErrors("reset_d_densities");
-		calc_densities_by_cuda << < 1, 1 >> > ();
-		checkCUDAErrors("calc_densities_by_cuda");*/
-
 		cudaEventRecord(stop, 0); cudaEventSynchronize(stop); cudaEventElapsedTime(&time, start, stop); cudaEventDestroy(start); cudaEventDestroy(stop);
 		//printf("\nCUDA execution time was %f ms", time);
 
 		cudaDeviceSynchronize();
-
 	}
 }
 
