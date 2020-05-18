@@ -348,7 +348,7 @@ __global__ void update_body_by_cuda_with_texture() {
 		for (int k = 0; k < d_N; k++) {
 			// skip the influence of body on itself
 			if (k == i) continue;
-			vector s1 = { d_bodies_soa->x[k] - d_bodies_soa->x[i], d_bodies_soa->y[k] - d_bodies_soa->y[i] };
+			vector s1 = { tex1Dfetch(tex_x, k) - tex1Dfetch(tex_x, i), tex1Dfetch(tex_y, k) - tex1Dfetch(tex_y, i) };
 			vector s2 = { s1.x * d_bodies_soa->m[k], s1.y * d_bodies_soa->m[k] };
 			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
 			f.x = f.x + s2.x / s3;
@@ -364,7 +364,7 @@ __global__ void update_body_by_cuda_with_texture() {
 		// new velocity
 		vector v_new = { d_bodies_soa->vx[i] + dt * a.x, d_bodies_soa->vy[i] + dt * a.y };
 		// new location
-		vector l_new = { d_bodies_soa->x[i] + dt * v_new.x, d_bodies_soa->y[i] + dt * v_new.y };
+		vector l_new = { tex1Dfetch(tex_x, i) + dt * v_new.x, d_bodies_soa->y[i] + dt * v_new.y };
 		d_bodies_soa->x[i] = l_new.x;
 		d_bodies_soa->y[i] = l_new.y;
 		d_bodies_soa->vx[i] = v_new.x;
