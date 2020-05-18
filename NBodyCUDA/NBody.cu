@@ -43,13 +43,12 @@ int N_FLOAT_SIZE = 0; // N * sizeof(float)
 
 int show_verbose = 0; // if show the cost time for each iteration. (0: false, >=1: true)
 
-// cuda texure variables
+// cuda texure variables 
 texture<float, 1, cudaReadModeElementType>tex_x;
 texture<float, 1, cudaReadModeElementType>tex_y;
 texture<float, 1, cudaReadModeElementType>tex_vx;
 texture<float, 1, cudaReadModeElementType>tex_vy;
 texture<float, 1, cudaReadModeElementType>tex_m;
-
 
 // declaration of all functions
 void print_help();
@@ -457,7 +456,8 @@ __global__ void update_bodies_by_cuda_with_texture() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		// new velocity
-		vector v_new = { d_bodies_soa->vx[i] + dt * d_accelerations[i].x, d_bodies_soa->vy[i] + dt * d_accelerations[i].y };
+		vector acc = d_accelerations[i];
+		vector v_new = { tex1Dfetch(tex_vx, i) + dt * acc.x, tex1Dfetch(tex_vy, i) + dt * acc.y };
 		// new location
 		vector l_new = { tex1Dfetch(tex_x, i) + dt * v_new.x,  tex1Dfetch(tex_y, i) + dt * v_new.y };
 		d_bodies_soa->x[i] = l_new.x;
@@ -509,21 +509,26 @@ __global__ void calc_accelerations_by_cuda_with_shared() {
 	}
 }
 
+/**
+ * Update bodies and densities by CUDA with shared memory
+ */
 __global__ void update_bodies_by_cuda_with_shared() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	__shared__ float x_arr[THREADS_PER_BLOCK];
 	__shared__ float y_arr[THREADS_PER_BLOCK];
 	__shared__ float vx_arr[THREADS_PER_BLOCK];
 	__shared__ float vy_arr[THREADS_PER_BLOCK];
+	__shared__ vector acc_arr[THREADS_PER_BLOCK];
 	int idx = threadIdx.x;
 	if (i < d_N) {
 		x_arr[idx] = d_bodies_soa->x[i];
 		y_arr[idx] = d_bodies_soa->y[i];
 		vx_arr[idx] = d_bodies_soa->vx[i];
 		vy_arr[idx] = d_bodies_soa->vy[i];
+		acc_arr[idx] = d_accelerations[i];
 		__syncthreads();
 		// new velocity
-		vector v_new = { vx_arr[i] + dt * d_accelerations[i].x, vy_arr[i] + dt * d_accelerations[i].y };
+		vector v_new = { vx_arr[i] + dt * acc_arr[i].x, vy_arr[i] + dt * d_accelerations[i].y };
 		// new location
 		vector l_new = { x_arr[i] + dt * v_new.x,  y_arr[i] + dt * v_new.y };
 		d_bodies_soa->x[i] = l_new.x;
