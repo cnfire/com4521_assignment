@@ -41,7 +41,7 @@ vector* hd_accelerations = NULL;
 
 int N_FLOAT_SIZE = 0; // N * sizeof(float)
 
-int show_verbose = 0; // if show the cost time for each iteration.
+int show_verbose = 0; // if show the cost time for each iteration. (0: false, >=1: true)
 
 // cuda texure variables
 texture<float, 1, cudaReadModeElementType>tex_x;
@@ -244,10 +244,21 @@ void step(void) {
 		}
 		cudaMemset(hd_densities, 0, size_t(D * D) * sizeof(float));
 		checkCUDAErrors("cudaMemset");
-		int BLOCKS_PER_GRID = N / THREADS_PER_BLOCK + 1;
-		CUDA_OPT_MODE opt_mode = READ_ONLY;
+
+		CUDA_OPT_MODE opt_mode = GLOBAL;
+		if (N <= THREADS_PER_BLOCK) {
+			opt_mode = TEXTURE;
+		}
+		else {
+			opt_mode = READ_ONLY;
+		}
+
+		opt_mode = GLOBAL;
 		//CUDA_OPT_MODE opt_mode = TEXTURE;
 		//CUDA_OPT_MODE opt_mode = GLOBAL;
+
+		int BLOCKS_PER_GRID = N / THREADS_PER_BLOCK + 1;
+
 		switch (opt_mode) {
 		case GLOBAL:
 			calc_accelerations_by_cuda_with_global << <BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
@@ -383,7 +394,6 @@ __global__ void calc_accelerations_by_cuda_with_global() {
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
-
 		// calc the acceleration of body
 		d_accelerations[i].x = G * f.x;
 		d_accelerations[i].y = G * f.y;
@@ -434,12 +444,9 @@ __global__ void calc_accelerations_by_cuda_with_texture() {
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
-		f.x = G * tex1Dfetch(tex_m, i) * f.x;
-		f.y = G * tex1Dfetch(tex_m, i) * f.y;
-
 		// calc the acceleration of body
-		d_accelerations[i].x = f.x / tex1Dfetch(tex_m, i);
-		d_accelerations[i].y = f.y / tex1Dfetch(tex_m, i);
+		d_accelerations[i].x = G * f.x;
+		d_accelerations[i].y = G * f.y;
 	}
 }
 
@@ -496,12 +503,9 @@ __global__ void calc_accelerations_by_cuda_with_shared() {
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
-		f.x = G * m_arr[i] * f.x;
-		f.y = G * m_arr[i] * f.y;
-
 		// calc the acceleration of body
-		d_accelerations[i].x = f.x / m_arr[i];
-		d_accelerations[i].y = f.y / m_arr[i];
+		d_accelerations[i].x = G * f.x;
+		d_accelerations[i].y = G * f.y;
 	}
 }
 
@@ -555,12 +559,9 @@ __global__ void calc_accelerations_by_cuda_with_readonly(nbody_soa const* __rest
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
-		f.x = G * nbodies->m[i] * f.x;
-		f.y = G * nbodies->m[i] * f.y;
-
 		// calc the acceleration of body
-		d_accelerations[i].x = f.x / nbodies->m[i];
-		d_accelerations[i].y = f.y / nbodies->m[i];
+		d_accelerations[i].x = G * f.x;
+		d_accelerations[i].y = G * f.y;
 	}
 }
 
