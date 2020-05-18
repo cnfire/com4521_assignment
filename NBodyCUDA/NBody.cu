@@ -169,7 +169,7 @@ void set_bodies_soa() {
 }
 
 void cleanup() {
-	printf("\nclean....\n");
+	printf("\nClean memory...\n");
 	free(bodies);
 	free(densities);
 	free(forces);
@@ -194,7 +194,6 @@ void step(void) {
 	}
 	else if (M == OPENMP) {
 		update_body_by_openmp();
-		// Calculate density for the D*D locations (activity map)
 		calc_densities();
 	}
 	else if (M == CUDA) {
@@ -206,10 +205,10 @@ void step(void) {
 		calc_densities_by_cuda << < 1, 1 >> > ();
 		cudaDeviceSynchronize();
 		checkCUDAErrors("calc_densities_by_cuda");
-
 	}
 	else {
-		fprintf(stderr, "\n%d mode is not supported", M);
+		fprintf(stderr, "\n%d Mode is not supported", M);
+		exit(1);
 	}
 }
 
@@ -419,7 +418,7 @@ __global__ void reset_d_densities() {
 
 __global__ void calc_densities_by_cuda() {
 	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
-		printf("error: No more than one thread. ");
+		fprintf(stderr, "\nerror: No more than one thread.");
 		return;
 	}
 	for (int i = 0; i < d_N; i++) {
