@@ -76,9 +76,11 @@ void perform_simulation();
 __global__ void calc_accelerations_by_cuda_with_global();
 __global__ void calc_accelerations_by_cuda_with_texture();
 __global__ void calc_accelerations_by_cuda_with_shared();
+__global__ void calc_accelerations_by_cuda_with_readonly(nbody_soa const* __restrict__ nbodies);
 __global__ void update_bodies_by_cuda_with_global();
 __global__ void update_bodies_by_cuda_with_texture();
 __global__ void update_bodies_by_cuda_with_shared();
+__global__ void update_bodies_by_cuda_with_global(nbody_soa const* __restrict__ nbodies, vector const* __restrict__ accelerations);
 
 int main(int argc, char* argv[]) {
 	// Processes the command line arguments
@@ -225,7 +227,9 @@ void step(void) {
 		cudaMemset(hd_densities, 0, size_t(D * D) * sizeof(float));
 		checkCUDAErrors("cudaMemset");
 		int BLOCKS_PER_GRID = N / THREADS_PER_BLOCK + 1;
-		CUDA_OPT_MODE opt_mode = TEXTURE;
+		CUDA_OPT_MODE opt_mode = READ_ONLY;
+		//CUDA_OPT_MODE opt_mode = TEXTURE;
+		//CUDA_OPT_MODE opt_mode = GLOBAL;
 		switch (opt_mode) {
 		case GLOBAL:
 			calc_accelerations_by_cuda_with_global << <BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
@@ -251,6 +255,9 @@ void step(void) {
 			cudaUnbindTexture(tex_m);
 			break;
 		case READ_ONLY:
+			calc_accelerations_by_cuda_with_readonly << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > (hd_bodies_soa);
+			update_bodies_by_cuda_with_global << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > (hd_bodies_soa, hd_accelerations);
+			checkCUDAErrors("calc_accelerations_by_cuda_with_readonly");
 			break;
 		default:
 			break;
@@ -413,7 +420,6 @@ __global__ void calc_accelerations_by_cuda_with_texture() {
 		// calc the acceleration of body
 		d_accelerations[i].x = f.x / d_bodies_soa->m[i];
 		d_accelerations[i].y = f.y / d_bodies_soa->m[i];
-
 	}
 }
 
@@ -440,6 +446,7 @@ __global__ void update_bodies_by_cuda_with_texture() {
 		atomicAdd(&d_densities[index], (float)(1.0 * d_D / d_N));
 	}
 }
+
 
 // when N < BLOCK_SIZE
 __global__ void calc_accelerations_by_cuda_with_shared() {
@@ -511,19 +518,49 @@ __global__ void update_bodies_by_cuda_with_shared() {
 	}
 }
 
-__global__ void calc_densities_by_cuda_with_global() {
-	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
-		printf("\nerror: No more than one thread.");
-		return;
+__global__ void calc_accelerations_by_cuda_with_readonly(nbody_soa const* __restrict__ nbodies) {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < d_N) {
+		// compute the force of every body
+		vector f = { 0, 0 };
+		for (int k = 0; k < d_N; k++) {
+			// skip the influence of body on itself
+			if (k == i) continue;
+			vector s1 = { nbodies->x[k] - nbodies->x[i], nbodies->y[k] - nbodies->y[i] };
+			vector s2 = { s1.x * nbodies->m[k], s1.y * nbodies->m[k] };
+			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
+			f.x = f.x + s2.x / s3;
+			f.y = f.y + s2.y / s3;
+		}
+		f.x = G * nbodies->m[i] * f.x;
+		f.y = G * nbodies->m[i] * f.y;
+
+		// calc the acceleration of body
+		d_accelerations[i].x = f.x / nbodies->m[i];
+		d_accelerations[i].y = f.y / nbodies->m[i];
 	}
-	for (int i = 0; i < d_N; i++) {
+}
+
+__global__ void update_bodies_by_cuda_with_global(nbody_soa const* __restrict__ nbodies, vector const* __restrict__ accelerations) {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < d_N) {
+		// new velocity
+		vector v_new = { nbodies->vx[i] + dt * accelerations[i].x, d_bodies_soa->vy[i] + dt * accelerations[i].y };
+		// new location
+		vector l_new = { nbodies->x[i] + dt * v_new.x, nbodies->y[i] + dt * v_new.y };
+		nbodies->x[i] = l_new.x;
+		nbodies->y[i] = l_new.y;
+		nbodies->vx[i] = v_new.x;
+		nbodies->vy[i] = v_new.y;
+
 		double scale = 1.0 / d_D;
 		// x-axis coordinate of D*D locations
-		int x = (int)ceil(d_bodies_soa->x[i] / scale) - 1;
+		int x = (int)ceil(nbodies->x[i] / scale) - 1;
 		// y-axis coordinate of D*D locations
-		int y = (int)ceil(d_bodies_soa->y[i] / scale) - 1;
+		int y = (int)ceil(nbodies->y[i] / scale) - 1;
 		// the index of one dimensional array
 		int index = y * d_D + x;
+		//d_densities[index] = d_densities[index] + 1.0 * d_D / d_N;
 		atomicAdd(&d_densities[index], (float)(1.0 * d_D / d_N));
 	}
 }
