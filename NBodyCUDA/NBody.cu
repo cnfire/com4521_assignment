@@ -192,9 +192,10 @@ void set_bodies_soa() {
 
 void cleanup() {
 	printf("\nClean memory...\n");
+	free(accelerations);
 	free(bodies);
 	free(densities);
-	free(accelerations);
+	
 	cudaFree(x_soa); cudaFree(y_soa); cudaFree(vx_soa); cudaFree(vy_soa); cudaFree(m_soa);
 	cudaFree(hd_bodies_soa);
 	cudaFree(hd_densities);
@@ -223,7 +224,7 @@ void step(void) {
 		float time;
 		cudaEvent_t start, stop; cudaEventCreate(&start); cudaEventCreate(&stop);
 		cudaEventRecord(start, 0);
-		cudaMemset(hd_densities, 0, N_FLOAT_SIZE);
+		cudaMemset(hd_densities, 0, size_t(D * D) * sizeof(float));
 		checkCUDAErrors("cudaMemset");
 		int BLOCKS_PER_GRID = N / THREADS_PER_BLOCK + 1;
 		CUDA_OPT_MODE opt_mode = GLOBAL;
@@ -232,7 +233,7 @@ void step(void) {
 			calc_accelerations_by_cuda << <BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
 			checkCUDAErrors("calc_accelerations_by_cuda");
 			update_bodies_by_cuda << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
-			
+
 			break;
 		case SHARED:
 			calc_accelerations_by_cuda_with_shared << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
