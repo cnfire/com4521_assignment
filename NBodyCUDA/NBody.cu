@@ -205,17 +205,26 @@ void step(void) {
 		calc_densities();
 	}
 	else if (M == CUDA) {
-		int size_f = N * sizeof(float);
-		cudaBindTexture(0, tex_x, x_soa, size_f); cudaBindTexture(0, tex_y, y_soa, size_f);
-		cudaBindTexture(0, tex_vx, vx_soa, size_f); cudaBindTexture(0, tex_vy, vy_soa, size_f);
-		cudaBindTexture(0, tex_m, m_soa, size_f);
-		update_body_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
-		checkCUDAErrors("update_body_by_cuda");
-		cudaUnbindTexture(tex_x);
-		cudaUnbindTexture(tex_y);
-		cudaUnbindTexture(tex_vx);
-		cudaUnbindTexture(tex_vy);
-		cudaUnbindTexture(tex_m);
+
+
+		int using_texture = 1;
+
+
+		if (!using_texture) {
+			update_body_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+			checkCUDAErrors("update_body_by_cuda");
+		}
+		else {
+			int size_f = N * sizeof(float);
+			cudaBindTexture(0, tex_x, x_soa, size_f); cudaBindTexture(0, tex_y, y_soa, size_f);
+			cudaBindTexture(0, tex_vx, vx_soa, size_f); cudaBindTexture(0, tex_vy, vy_soa, size_f);
+			cudaBindTexture(0, tex_m, m_soa, size_f);
+			update_body_by_cuda << < N / THREADS_PER_BLOCK + 1, THREADS_PER_BLOCK >> > ();
+			checkCUDAErrors("update_body_by_cuda");
+			cudaUnbindTexture(tex_x); cudaUnbindTexture(tex_y);
+			cudaUnbindTexture(tex_vx); cudaUnbindTexture(tex_vy);
+			cudaUnbindTexture(tex_m);
+		}
 
 		reset_d_densities << <1, 1 >> > ();
 		checkCUDAErrors("reset_d_densities");
