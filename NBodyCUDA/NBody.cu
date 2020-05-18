@@ -418,7 +418,7 @@ __global__ void reset_d_densities() {
 
 __global__ void calc_densities_by_cuda() {
 	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
-		fprintf(stderr, "\nerror: No more than one thread.");
+		printf("\nerror: No more than one thread.");
 		return;
 	}
 	for (int i = 0; i < d_N; i++) {
