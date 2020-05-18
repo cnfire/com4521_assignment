@@ -28,13 +28,13 @@ char* input_file = NULL;	// input file with an initial N bodies of data
 nbody* bodies = NULL;
 nbody_soa* bodies_soa = NULL;
 __device__ nbody* d_bodies;
-nbody* hd_bodies = nullptr;
+nbody* hd_bodies = NULL;
 __device__ nbody_soa* d_bodies_soa;
-nbody_soa* hd_bodies_soa = nullptr;
+nbody_soa* hd_bodies_soa = NULL;
 
 float* densities;	// store the density values of the D*D locations (acitvity map)
 __device__ float* d_densities;
-float* hd_densities = nullptr;
+float* hd_densities = NULL;
 
 vector* forces;	// force(F) of every body
 __device__ vector* d_forces;
@@ -125,6 +125,7 @@ int main(int argc, char* argv[]) {
 
 		cudaMalloc((void**)&hd_bodies_soa, sizeof(nbody_soa));
 		cudaMemcpyToSymbol(d_bodies_soa, &hd_bodies_soa, sizeof(hd_bodies_soa));
+		cudaMemcpy(hd_bodies_soa, bodies_soa, sizeof(bodies_soa), cudaMemcpyHostToDevice);
 		int size_b = N * sizeof(float);
 		float* x; cudaMalloc((void**)&x, size_b); cudaMemcpy(x, bodies_soa->x, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->x), &x, sizeof(float*), cudaMemcpyHostToDevice);
 		float* y; cudaMalloc((void**)&y, size_b); cudaMemcpy(y, bodies_soa->y, size_b, cudaMemcpyHostToDevice); cudaMemcpy(&(hd_bodies_soa->y), &y, sizeof(float*), cudaMemcpyHostToDevice);
@@ -153,7 +154,7 @@ int main(int argc, char* argv[]) {
 		else {
 			initViewer(N, D, M, step);
 			//setNBodyPositions(hd_bodies);
-			setNBodyPositions2f(hd_bodies_soa->x, hd_bodies_soa->y);
+			setNBodyPositions2f(hd_bodies_soa->x, hd_bodies_soa->x);
 			setHistogramData(hd_densities);
 			startVisualisationLoop();
 		}
