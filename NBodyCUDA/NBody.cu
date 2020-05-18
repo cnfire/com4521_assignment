@@ -285,7 +285,7 @@ void step(void) {
 		}
 
 		if (show_verbose) {
-			cudaEventRecord(stop, 0); cudaEventSynchronize(stop); cudaEventElapsedTime(&time, start, stop); 
+			cudaEventRecord(stop, 0); cudaEventSynchronize(stop); cudaEventElapsedTime(&time, start, stop);
 			cudaEventDestroy(start); cudaEventDestroy(stop);
 			printf("\nCUDA execution time was %f ms", time);
 		}
@@ -373,7 +373,6 @@ void update_location_velocity() {
 __global__ void calc_accelerations_by_cuda_with_global() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
-		// compute the force of every body
 		vector f = { 0, 0 };
 		for (int k = 0; k < d_N; k++) {
 			// skip the influence of body on itself
@@ -384,17 +383,15 @@ __global__ void calc_accelerations_by_cuda_with_global() {
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
-		f.x = G * d_bodies_soa->m[i] * f.x;
-		f.y = G * d_bodies_soa->m[i] * f.y;
 
 		// calc the acceleration of body
-		d_accelerations[i].x = f.x / d_bodies_soa->m[i];
-		d_accelerations[i].y = f.y / d_bodies_soa->m[i];
+		d_accelerations[i].x = G * f.x;
+		d_accelerations[i].y = G * f.y;
 	}
 }
 
 /**
- * Calculate accelerations by CUDA with global memory
+ * Update bodies and densities by CUDA with global memory
  */
 __global__ void update_bodies_by_cuda_with_global() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -432,20 +429,23 @@ __global__ void calc_accelerations_by_cuda_with_texture() {
 			// skip the influence of body on itself
 			if (k == i) continue;
 			vector s1 = { tex1Dfetch(tex_x, k) - tex1Dfetch(tex_x, i), tex1Dfetch(tex_y, k) - tex1Dfetch(tex_y, i) };
-			vector s2 = { s1.x * d_bodies_soa->m[k], s1.y * d_bodies_soa->m[k] };
+			vector s2 = { s1.x * tex1Dfetch(tex_m, k), s1.y * tex1Dfetch(tex_m, k) };
 			double s3 = powf(s1.x * s1.x + s1.y * s1.y + SOFTENING * SOFTENING, 1.5);
 			f.x = f.x + s2.x / s3;
 			f.y = f.y + s2.y / s3;
 		}
-		f.x = G * d_bodies_soa->m[i] * f.x;
-		f.y = G * d_bodies_soa->m[i] * f.y;
+		f.x = G * tex1Dfetch(tex_m, i) * f.x;
+		f.y = G * tex1Dfetch(tex_m, i) * f.y;
 
 		// calc the acceleration of body
-		d_accelerations[i].x = f.x / d_bodies_soa->m[i];
-		d_accelerations[i].y = f.y / d_bodies_soa->m[i];
+		d_accelerations[i].x = f.x / tex1Dfetch(tex_m, i);
+		d_accelerations[i].y = f.y / tex1Dfetch(tex_m, i);
 	}
 }
 
+/**
+ * Update bodies and densities by CUDA with texture memory
+ */
 __global__ void update_bodies_by_cuda_with_texture() {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
