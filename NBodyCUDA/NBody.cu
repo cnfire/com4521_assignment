@@ -136,6 +136,7 @@ void perform_simulation() {
 		// start timer
 		double begin_outer = omp_get_wtime();
 		for (int i = 0; i < I; i++) {
+			printf("\n\nIteration epoch:%d...", i, i);
 			step();
 		}
 		// stop timer
@@ -172,9 +173,11 @@ void cleanup() {
 	free(bodies);
 	free(densities);
 	free(forces);
-	//free(a); free(b); free(c);
-	//cudaFree(d_a); cudaFree(d_b); cudaFree(d_c);
-	//checkCUDAError("CUDA cleanup");
+	cudaFree(x_soa);
+	cudaFree(y_soa);
+	cudaFree(hd_bodies_soa);
+	cudaFree(hd_densities);
+	checkCUDAErrors("CUDA cleanup");
 }
 
 
