@@ -251,9 +251,7 @@ void step(void) {
 			opt_mode = GLOBAL;
 		}
 
-		opt_mode = TEXTURE;
-		//CUDA_OPT_MODE opt_mode = TEXTURE;
-		//CUDA_OPT_MODE opt_mode = GLOBAL;
+		 opt_mode = TEXTURE;//TEXTURE, GLOBAL, READ_ONLY
 
 		int BLOCKS_PER_GRID = N / THREADS_PER_BLOCK + 1;
 
