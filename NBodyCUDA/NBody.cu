@@ -159,7 +159,7 @@ void perform_simulation() {
 		double begin_outer = omp_get_wtime();
 		for (int i = 0; i < I; i++) {
 			if (!show_verbose) {
-				printf("\n\nIteration epoch:%d...", i, i);
+				//printf("\n\nIteration epoch:%d...", i);
 				step();
 			}
 			else {
@@ -245,13 +245,13 @@ void step(void) {
 
 		CUDA_OPT_MODE opt_mode = GLOBAL;
 		if (N <= THREADS_PER_BLOCK) {
-			opt_mode = TEXTURE;
+			opt_mode = SHARED;
 		}
 		else {
-			opt_mode = READ_ONLY;
+			opt_mode = GLOBAL;
 		}
 
-		opt_mode = GLOBAL;
+		opt_mode = TEXTURE;
 		//CUDA_OPT_MODE opt_mode = TEXTURE;
 		//CUDA_OPT_MODE opt_mode = GLOBAL;
 
@@ -481,8 +481,8 @@ __global__ void update_bodies_by_cuda_with_texture() {
  */
 __global__ void calc_accelerations_by_cuda_with_shared() {
 	if (d_N > THREADS_PER_BLOCK) {
-		fprintf(stderr, "\nIn this shared case, N is no more than %d.\n", THREADS_PER_BLOCK);
-		exit(EXIT_FAILURE);
+		printf("\nIn this shared case, N is no more than %d.\n", THREADS_PER_BLOCK);
+		return;
 	}
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	__shared__ float x_arr[THREADS_PER_BLOCK];
