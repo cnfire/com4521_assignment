@@ -78,7 +78,7 @@ __global__ void calc_accelerations_by_cuda_with_shared();
 __global__ void calc_accelerations_by_cuda_with_readonly(nbody_soa const* __restrict__ nbodies);
 __global__ void update_bodies_by_cuda_with_global();
 __global__ void update_bodies_by_cuda_with_texture();
-__global__ void update_bodies_by_cuda_with_global(nbody_soa const* __restrict__ nbodies, vector const* __restrict__ accelerations);
+__global__ void update_bodies_by_cuda_with_readonly(nbody_soa const* __restrict__ nbodies, vector const* __restrict__ accelerations);
 
 int main(int argc, char* argv[]) {
 	// Processes the command line arguments
@@ -286,8 +286,8 @@ void step(void) {
 		case READ_ONLY:
 			calc_accelerations_by_cuda_with_readonly << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > (hd_bodies_soa);
 			checkCUDAErrors("calc_accelerations_by_cuda_with_readonly");
-			update_bodies_by_cuda_with_global << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > (hd_bodies_soa, hd_accelerations);
-			checkCUDAErrors("update_bodies_by_cuda_with_global");
+			update_bodies_by_cuda_with_readonly << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > (hd_bodies_soa, hd_accelerations);
+			checkCUDAErrors("update_bodies_by_cuda_with_readonly");
 			break;
 		default:
 			break;
@@ -636,18 +636,6 @@ void calc_densities_with_atomic() {
 		densities[i] = densities[i] * D / N;
 	}
 }
-
-__global__ void reset_d_densities() {
-	if (blockIdx.x * blockDim.x + threadIdx.x > 0) {
-		printf("error: No more than one thread. ");
-		return;
-	}
-	for (int i = 0; i < d_D * d_D; i++) {
-		d_densities[i] = 0;
-	}
-}
-
-
 
 void print_help() {
 	printf("nbody_%s N D M [-i I] [-i input_file]\n", USER_NAME);
