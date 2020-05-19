@@ -541,8 +541,9 @@ __global__ void calc_accelerations_by_cuda_with_readonly(nbody_soa const* __rest
 __global__ void update_bodies_by_cuda_with_readonly(nbody_soa const* __restrict__ nbodies, vector const* __restrict__ accelerations) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
-		// new velocity
-		vector v_new = { nbodies->vx[i] + dt * accelerations[i].x, d_bodies_soa->vy[i] + dt * accelerations[i].y };
+		// new velocity 
+		vector acc = accelerations[i];
+		vector v_new = { nbodies->vx[i] + dt * acc.x, d_bodies_soa->vy[i] + dt * acc.y };
 		// new location
 		vector l_new = { nbodies->x[i] + dt * v_new.x, nbodies->y[i] + dt * v_new.y };
 		nbodies->x[i] = l_new.x;
