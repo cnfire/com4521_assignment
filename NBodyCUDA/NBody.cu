@@ -243,17 +243,15 @@ void step(void) {
 		cudaMemset(hd_densities, 0, size_t(D * D) * sizeof(float));
 		checkCUDAErrors("cudaMemset");
 
-		CUDA_OPT_MODE opt_mode = GLOBAL;
+		CUDA_OPT_MODE opt_mode = GLOBAL;//TEXTURE, GLOBAL, READ_ONLY
 		if (N <= THREADS_PER_BLOCK) {
 			opt_mode = SHARED;
 		}
 		else {
-			opt_mode = GLOBAL;
+			opt_mode = READ_ONLY;
 		}
 
-		 opt_mode = TEXTURE;//TEXTURE, GLOBAL, READ_ONLY
-
-		int BLOCKS_PER_GRID = N / THREADS_PER_BLOCK + 1;
+		int BLOCKS_PER_GRID = N % THREADS_PER_BLOCK == 0 ? N / THREADS_PER_BLOCK : N / THREADS_PER_BLOCK + 1;
 
 		switch (opt_mode) {
 		case GLOBAL:
