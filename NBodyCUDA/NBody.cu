@@ -78,7 +78,6 @@ __global__ void calc_accelerations_by_cuda_with_shared();
 __global__ void calc_accelerations_by_cuda_with_readonly(nbody_soa const* __restrict__ nbodies);
 __global__ void update_bodies_by_cuda_with_global();
 __global__ void update_bodies_by_cuda_with_texture();
-__global__ void update_bodies_by_cuda_with_shared();
 __global__ void update_bodies_by_cuda_with_global(nbody_soa const* __restrict__ nbodies, vector const* __restrict__ accelerations);
 
 int main(int argc, char* argv[]) {
@@ -268,8 +267,8 @@ void step(void) {
 		case SHARED:
 			calc_accelerations_by_cuda_with_shared << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
 			checkCUDAErrors("calc_accelerations_by_cuda_with_shared");
-			update_bodies_by_cuda_with_shared << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
-			checkCUDAErrors("update_bodies_by_cuda_with_shared");
+			update_bodies_by_cuda_with_global << < BLOCKS_PER_GRID, THREADS_PER_BLOCK >> > ();
+			checkCUDAErrors("update_bodies_by_cuda_with_global");
 			break;
 		case TEXTURE:
 			cudaBindTexture(0, tex_x, x_soa, N_FLOAT_SIZE); cudaBindTexture(0, tex_y, y_soa, N_FLOAT_SIZE);
@@ -481,6 +480,10 @@ __global__ void update_bodies_by_cuda_with_texture() {
  * Calculate accelerations by CUDA with shared memory(when N <= BLOCK_SIZE)
  */
 __global__ void calc_accelerations_by_cuda_with_shared() {
+	if (d_N > THREADS_PER_BLOCK) {
+		fprintf(stderr, "\nIn this shared case, N is no more than %d.\n", THREADS_PER_BLOCK);
+		exit(EXIT_FAILURE);
+	}
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	__shared__ float x_arr[THREADS_PER_BLOCK];
 	__shared__ float y_arr[THREADS_PER_BLOCK];
@@ -510,44 +513,6 @@ __global__ void calc_accelerations_by_cuda_with_shared() {
 }
 
 /**
- * Update bodies and densities by CUDA with shared memory
- */
-__global__ void update_bodies_by_cuda_with_shared() {
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	__shared__ float x_arr[THREADS_PER_BLOCK];
-	__shared__ float y_arr[THREADS_PER_BLOCK];
-	__shared__ float vx_arr[THREADS_PER_BLOCK];
-	__shared__ float vy_arr[THREADS_PER_BLOCK];
-	__shared__ vector acc_arr[THREADS_PER_BLOCK];
-	int idx = threadIdx.x;
-	if (i < d_N) {
-		x_arr[idx] = d_bodies_soa->x[i];
-		y_arr[idx] = d_bodies_soa->y[i];
-		vx_arr[idx] = d_bodies_soa->vx[i];
-		vy_arr[idx] = d_bodies_soa->vy[i];
-		acc_arr[idx] = d_accelerations[i];
-		__syncthreads();
-		// new velocity
-		vector v_new = { vx_arr[i] + dt * acc_arr[i].x, vy_arr[i] + dt * d_accelerations[i].y };
-		// new location
-		vector l_new = { x_arr[i] + dt * v_new.x,  y_arr[i] + dt * v_new.y };
-		d_bodies_soa->x[i] = l_new.x;
-		d_bodies_soa->y[i] = l_new.y;
-		d_bodies_soa->vx[i] = v_new.x;
-		d_bodies_soa->vy[i] = v_new.y;
-
-		double scale = 1.0 / d_D;
-		// x-axis coordinate of D*D locations
-		int x = (int)ceil(x_arr[i] / scale) - 1;
-		// y-axis coordinate of D*D locations
-		int y = (int)ceil(y_arr[i] / scale) - 1;
-		// the index of one dimensional array
-		int index = y * d_D + x;
-		atomicAdd(&d_densities[index], (float)(1.0 * d_D / d_N));
-	}
-}
-
-/**
  * Calculate accelerations by CUDA with readonly memory
  */
 __global__ void calc_accelerations_by_cuda_with_readonly(nbody_soa const* __restrict__ nbodies) {
@@ -570,7 +535,10 @@ __global__ void calc_accelerations_by_cuda_with_readonly(nbody_soa const* __rest
 	}
 }
 
-__global__ void update_bodies_by_cuda_with_global(nbody_soa const* __restrict__ nbodies, vector const* __restrict__ accelerations) {
+/**
+ * Update bodies and densities by CUDA with read-only memory
+ */
+__global__ void update_bodies_by_cuda_with_readonly(nbody_soa const* __restrict__ nbodies, vector const* __restrict__ accelerations) {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < d_N) {
 		// new velocity
